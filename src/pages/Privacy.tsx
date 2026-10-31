@@ -104,6 +104,11 @@ export function Privacy() {
             them through our server.
           </li>
           <li>
+            <strong>News headlines</strong> come from The Guardian. Our server fetches the headlines; the pictures
+            load straight from The Guardian&rsquo;s image server, which can see your IP address, and a headline you
+            open takes you to theguardian.com, which has its own privacy policy.
+          </li>
+          <li>
             <strong>Links to GitHub</strong> take you to GitHub, which has its own privacy policy.
           </li>
         </ul>

@@ -68,9 +68,9 @@ export function PageHeader({ eyebrow, title, description, actions, className }: 
   return (
     <header className={cn('relative isolate mb-6 py-7 sm:py-9', className)}>
       {/*
-        Full-width banner behind the title, Pitch Me's own: deep purple through magenta into
-        cyan (mixed over the brand purple so white text keeps 4.5:1 across it, phones
-        included), faint pitch markings on the right, the mint-to-cyan line along the bottom.
+        Full-width banner behind the title, Pitch Me's own: a little purple at the left, then
+        mostly royal blue into cyan (mixed over the brand purple so white text keeps 4.5:1 across
+        it, phones included), faint pitch markings on the right, the mint-to-cyan line below.
         It reaches the window edges from inside the page container; .pm-root clips the overhang.
       */}
       <div
@@ -78,7 +78,7 @@ export function PageHeader({ eyebrow, title, description, actions, className }: 
         className="absolute inset-y-0 left-1/2 -z-10 w-screen -translate-x-1/2 overflow-hidden bg-brand-2"
         style={{
           backgroundImage:
-            'linear-gradient(100deg, transparent 0%, rgb(var(--glow-3) / 0.55) 52%, rgb(var(--accent-2) / 0.45) 100%)',
+            'linear-gradient(100deg, transparent 0%, rgb(var(--glow-blue) / 0.75) 30%, rgb(var(--glow-blue) / 0.6) 62%, rgb(var(--accent-2) / 0.45) 100%)',
         }}
       >
         <svg

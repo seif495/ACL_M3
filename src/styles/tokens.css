@@ -49,6 +49,7 @@
 
   /* Depth: a third accent for glows only (never text), mixed with mint and cyan */
   --glow-3: 200 60 255;     /* #C83CFF magenta */
+  --glow-blue: 45 100 235;  /* #2D64EB royal blue: page-title banners */
 
   /* Positions (chips: brand-coloured text on these) */
   --pos-gk: 255 225 77;     /* #FFE14D */

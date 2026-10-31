@@ -145,7 +145,7 @@ function CaptainPick() {
   return (
     <PlayerOpener
       player={{ name: top.player_name, team: top.team_name, photo: avatars[top.player_name], status: top.status, news: top.news, chance: top.chance_of_playing_next_round }}
-      className="mt-6 flex max-w-xl items-center gap-4 rounded-lg border border-white/10 bg-black/25 p-4"
+      className="mt-6 flex max-w-xl items-center gap-4 rounded-xl border border-white/10 bg-black/30 p-4 shadow-pop backdrop-blur-sm"
     >
       <PlayerAvatar name={top.player_name} src={avatars[top.player_name]} size={72} loading="eager" />
       <div className="min-w-0 flex-1">
@@ -183,16 +183,51 @@ function Hero() {
 
   // The countdown lives in the deadline bar on every page; the hero leads with the model's pick.
   return (
-    <section
-      aria-labelledby="home-title"
-      className="border-b border-line"
-      style={{ backgroundImage: 'linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--bg)) 70%)' }}
-    >
-      <Container className="grid grid-cols-1 gap-6 py-8 sm:py-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-center">
+    <section aria-labelledby="home-title" className="relative isolate overflow-hidden border-b border-line bg-brand">
+      {/* Mesh of the site's lights over the brand purple */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 -z-10"
+        style={{
+          background:
+            'radial-gradient(45rem 28rem at 8% 0%, rgb(var(--accent) / 0.22), transparent 60%),' +
+            'radial-gradient(40rem 26rem at 95% 10%, rgb(var(--accent-2) / 0.2), transparent 60%),' +
+            'radial-gradient(50rem 30rem at 60% 130%, rgb(var(--glow-3) / 0.28), transparent 60%),' +
+            'linear-gradient(160deg, rgb(var(--brand)) 0%, rgb(var(--bg)) 85%)',
+        }}
+      />
+      {/* Faint pitch markings */}
+      <svg
+        aria-hidden="true"
+        className="absolute -right-24 top-1/2 -z-10 h-[34rem] w-[52rem] -translate-y-1/2 opacity-[0.07]"
+        viewBox="0 0 160 100"
+        fill="none"
+        stroke="white"
+        strokeWidth="0.6"
+      >
+        <rect x="2" y="2" width="156" height="96" rx="1" />
+        <line x1="80" y1="2" x2="80" y2="98" />
+        <circle cx="80" cy="50" r="13" />
+        <circle cx="80" cy="50" r="0.8" fill="white" />
+        <rect x="2" y="26" width="22" height="48" />
+        <rect x="2" y="38" width="8" height="24" />
+        <rect x="136" y="26" width="22" height="48" />
+        <rect x="150" y="38" width="8" height="24" />
+        <path d="M24 42 a10 10 0 0 1 0 16" />
+        <path d="M136 42 a10 10 0 0 0 0 16" />
+      </svg>
+      <div aria-hidden="true" className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-accent-2/50 to-transparent" />
+      <Container className="grid grid-cols-1 gap-6 py-10 sm:py-14 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-center">
         <div>
           <p className="text-micro font-semibold uppercase text-accent">{season?.season ?? 'Fantasy Premier League'}</p>
-          <h1 id="home-title" className="mt-1 font-display text-h1 font-extrabold text-fg sm:text-display">
-            {gw ? `Gameweek ${gw}` : 'Pitch Me'}
+          <h1 id="home-title" className="mt-1 font-display text-[2.5rem] font-extrabold leading-[1.05] tracking-tight text-fg sm:text-[3.5rem]">
+            {gw ? (
+              <>
+                Gameweek <span className="text-gradient">{gw}</span>
+              </>
+            ) : (
+              'Pitch Me'
+            )}
           </h1>
           <p className="mt-1 max-w-lg text-body text-fg-muted">
             Model picks, fixtures and team news for the next deadline.
@@ -307,7 +342,7 @@ function TopPicks() {
       ) : isError ? (
         <ErrorState title="Predictions unavailable" onRetry={() => refetch()} />
       ) : (
-        <ol className="grid border-t border-line sm:grid-cols-2">
+        <ol className="grid grid-cols-1 border-t border-line sm:grid-cols-2">
           {players.map((p, i) => {
             const opp = p.fixture_context;
             return (
@@ -395,11 +430,11 @@ export function Home() {
       {/* Two independent columns, so cards keep their natural height (rows of paired cards
           stretched the shorter one and left empty blocks). */}
       <Container className="grid items-start gap-5 py-6 lg:grid-cols-3">
-        <div className="space-y-5 lg:col-span-2">
+        <div className="min-w-0 space-y-5 lg:col-span-2">
           <NextFixtures />
           <TopPicks />
         </div>
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
           <MiniTable />
           <TeamNews />
         </div>

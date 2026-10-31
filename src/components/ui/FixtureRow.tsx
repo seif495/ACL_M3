@@ -49,7 +49,7 @@ export function FixtureRow({ home, away, homeScore, awayScore, kickoff, status =
   const statusLabel = status === 'finished' ? 'FT' : status === 'live' ? 'Live' : status === 'postponed' ? 'Postponed' : null;
 
   const rowClass = cn(
-    'grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-line px-2 py-3 last:border-0 sm:gap-4 sm:px-4',
+    'grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-line px-2 py-3 last:border-0 sm:gap-4 sm:px-4',
     to && 'transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
     className,
   );

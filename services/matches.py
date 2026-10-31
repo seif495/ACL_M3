@@ -197,6 +197,52 @@ def live_players(feed: Dict[str, Any], fixture_id: str, elements: Dict[int, Dict
     return rows
 
 
+def _surname(name: str) -> str:
+    """"C. Palmer" -> "palmer", "Gabriel Martinelli Silva" -> "silva"."""
+    from utils.text import normalize_name
+    parts = normalize_name(name or "").replace(".", " ").split()
+    return parts[-1] if parts else ""
+
+
+def _match_player(api_name: Optional[str], players: List[Dict[str, Any]]) -> Optional[str]:
+    """Our player for an API-Football name: the same surname (or a name word) on that side."""
+    if not api_name:
+        return None
+    from utils.text import normalize_name
+    want = _surname(api_name)
+    words = set(normalize_name(api_name).replace(".", " ").split())
+    hits = [p["name"] for p in players if _surname(p["name"]) == want]
+    if len(hits) == 1:
+        return hits[0]
+    hits = [p["name"] for p in players if want and want in normalize_name(p["name"]).split()]
+    if len(hits) == 1:
+        return hits[0]
+    hits = [p["name"] for p in players if words & set(normalize_name(p["name"]).split()) - {"de", "da", "van", "el"}]
+    return hits[0] if len(hits) == 1 else None
+
+
+def timeline(events: List[Dict[str, Any]], fixture: Dict[str, Any], players: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Goal events (services/goal_events) split by the side they count for: an own goal counts for
+    the other side. Players are matched to ours by name, so the page can open their stats."""
+    home_team, away_team = fixture["home_team"], fixture["away_team"]
+    mine = {home_team: [p for p in players if p["team"] == home_team], away_team: [p for p in players if p["team"] == away_team]}
+    out: Dict[str, List[Dict[str, Any]]] = {"home": [], "away": []}
+    for e in events:
+        team = e.get("team")
+        if team not in (home_team, away_team):
+            # unknown club name: find the player on either side
+            team = next((t for t in (home_team, away_team) if _match_player(e.get("player"), mine[t])), None)
+        if team is None:
+            continue
+        player = _match_player(e.get("player"), mine[team]) or e.get("player")
+        side = "home" if team == home_team else "away"
+        if e["kind"] == "own_goal":
+            side = "away" if side == "home" else "home"
+        out[side].append({"minute": e.get("minute"), "extra": e.get("extra"), "kind": e["kind"], "player": player,
+                          "assist": e.get("assist")})
+    return out
+
+
 # ------------------------------------------------------------------ payload
 
 def _status_elements() -> Dict[int, Dict[str, Any]]:
@@ -248,10 +294,14 @@ def match_page(conn, fixture_id: str, *,
                "home_difficulty": f.get("home_difficulty"), "away_difficulty": f.get("away_difficulty")}
 
     from services.teams import season_fixtures
+    from services import goal_events as ge
     fixtures = season_fixtures(conn, season)
+    events = ge.events_for(fixture["id"], season) if played else None
     payload: Dict[str, Any] = {
         **fixture, "live": live_info,
         "summary": summarize(fixture, raw) if played else None,
+        # Goal minutes and penalties (API-Football via the daily job); null until fetched
+        "goals": timeline(events, fixture, [player_row(r) for r in raw]) if events is not None else None,
         "form": {"home": form_before(fixtures, fixture["home_team"], f.get("kickoff_time")),
                  "away": form_before(fixtures, fixture["away_team"], f.get("kickoff_time"))},
         "meetings": meetings(conn.execute_query(MEETINGS_QUERY, {"id": fixture_id, "home": fixture["home_team"],

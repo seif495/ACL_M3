@@ -650,6 +650,15 @@ export interface MatchSide {
   unused: MatchPlayer[];
 }
 
+export interface MatchGoal {
+  minute: number | null;
+  extra: number | null;
+  kind: 'goal' | 'penalty' | 'own_goal' | 'missed_penalty';
+  /** Our player's name when matched, else API-Football's ("C. Palmer"). */
+  player: string | null;
+  assist: string | null;
+}
+
 export interface MatchPageResponse {
   id: string;
   season: string;
@@ -669,6 +678,8 @@ export interface MatchPageResponse {
     bonus: { name: string; team: string | null; bonus: number; bps: number }[];
     top_scorer: { name: string; team: string | null; points: number } | null;
   } | null;
+  /** Goal minutes and penalties (API-Football), by the side each counts for; null until fetched. */
+  goals?: { home: MatchGoal[]; away: MatchGoal[] } | null;
   form: { home: TeamMatch[]; away: TeamMatch[] };
   meetings: {
     fixture_id: string;

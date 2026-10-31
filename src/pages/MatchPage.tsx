@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Radio } from 'lucide-react';
-import { apiService, handleApiError, isNotFoundError, type MatchPageResponse, type MatchPlayer, type MatchSide } from '../services/api';
+import { apiService, handleApiError, isNotFoundError, type MatchGoal, type MatchPageResponse, type MatchPlayer, type MatchSide } from '../services/api';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { usePlayerDialog } from '../hooks/usePlayerDialog';
 import { getClubAbbreviation, getClubLogoPath } from '../utils/clubLogos';
@@ -16,29 +16,37 @@ const LIVE_REFRESH_MS = 60_000;
 const short = (name: string) => name.split(' ').slice(-1)[0] || name;
 const times = (n: number) => (n > 1 ? ` ×${n}` : '');
 
-function Events({ side, align }: { side: MatchSide; align: 'left' | 'right' }) {
+const minute = (g: MatchGoal) => (g.minute == null ? '' : ` ${g.minute}${g.extra ? `+${g.extra}` : ''}′`);
+const KIND_NOTE: Record<MatchGoal['kind'], string> = { goal: '', penalty: ' (pen)', own_goal: ' (og)', missed_penalty: ' (pen missed)' };
+const KIND_WORD: Record<MatchGoal['kind'], string> = { goal: 'Goal', penalty: 'Penalty', own_goal: 'Own goal', missed_penalty: 'Penalty missed' };
+
+/** A side's goals under its crest: with minutes and penalties when API-Football's events are
+ * in (`goals`), else FPL's scorers; then red cards. */
+function Events({ side, goals, align }: { side: MatchSide; goals?: MatchGoal[] | null; align: 'left' | 'right' }) {
+  const goalLines = goals
+    ? goals.map((g, i) => ({
+        key: `ev-${i}`,
+        icon: g.kind === 'missed_penalty' ? '✕' : '⚽',
+        text: `${short(g.player ?? '?')}${minute(g)}${KIND_NOTE[g.kind]}`,
+        label: `${KIND_WORD[g.kind]}: ${g.player ?? 'unknown'}${g.minute != null ? `, minute ${g.minute}${g.extra ? ` plus ${g.extra}` : ''}` : ''}`,
+      }))
+    : [
+        ...side.scorers.map((e) => ({ key: `g-${e.name}`, icon: '⚽', text: `${short(e.name)}${times(e.count)}`, label: `Goal: ${e.name}` })),
+        ...side.own_goals_for.map((e) => ({ key: `og-${e.name}`, icon: '⚽', text: `${short(e.name)} (og)${times(e.count)}`, label: `Own goal: ${e.name}` })),
+        ...side.penalties_missed.map((e) => ({ key: `pm-${e.name}`, icon: '✕', text: `${short(e.name)} (pen missed)`, label: `Penalty missed: ${e.name}` })),
+      ];
   const lines: { key: string; icon: string; text: string; label: string }[] = [
-    ...side.scorers.map((e) => ({ key: `g-${e.name}`, icon: '⚽', text: `${short(e.name)}${times(e.count)}`, label: `Goal: ${e.name}` })),
-    ...side.own_goals_for.map((e) => ({ key: `og-${e.name}`, icon: '⚽', text: `${short(e.name)} (og)${times(e.count)}`, label: `Own goal: ${e.name}` })),
+    ...goalLines,
     ...side.red_cards.map((e) => ({ key: `r-${e.name}`, icon: '🟥', text: short(e.name), label: `Red card: ${e.name}` })),
-    ...side.penalties_missed.map((e) => ({ key: `pm-${e.name}`, icon: '✕', text: `${short(e.name)} (pen missed)`, label: `Penalty missed: ${e.name}` })),
   ];
   if (!lines.length) return null;
   return (
     <ul className={cn('mt-3 space-y-1 text-data text-fg', align === 'right' ? 'text-right' : 'text-left')}>
       {lines.map((l) => (
-        <li key={l.key} aria-label={l.label}>
-          {align === 'left' ? (
-            <>
-              <span aria-hidden="true" className="mr-1.5">{l.icon}</span>
-              {l.text}
-            </>
-          ) : (
-            <>
-              {l.text}
-              <span aria-hidden="true" className="ml-1.5">{l.icon}</span>
-            </>
-          )}
+        // The icon sits beside the text even when a long line wraps on a phone
+        <li key={l.key} aria-label={l.label} className={cn('flex items-start gap-1.5', align === 'right' ? 'flex-row-reverse text-right' : '')}>
+          <span aria-hidden="true" className="shrink-0">{l.icon}</span>
+          <span aria-hidden="true">{l.text}</span>
         </li>
       ))}
     </ul>
@@ -257,7 +265,7 @@ export function MatchPage() {
                       <span className="sm:hidden">{getClubAbbreviation(m.home_team) || m.home_team}</span>
                     </span>
                   </Link>
-                  {s && <Events side={s.home} align="right" />}
+                  {s && <Events side={s.home} goals={m.goals?.home} align="right" />}
                 </div>
                 <div className="flex flex-col items-center pt-3">
                   {played ? (
@@ -293,7 +301,7 @@ export function MatchPage() {
                       <span className="sm:hidden">{getClubAbbreviation(m.away_team) || m.away_team}</span>
                     </span>
                   </Link>
-                  {s && <Events side={s.away} align="left" />}
+                  {s && <Events side={s.away} goals={m.goals?.away} align="left" />}
                 </div>
               </div>
             </>

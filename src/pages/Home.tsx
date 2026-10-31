@@ -22,6 +22,9 @@ import {
 } from '../components/ui';
 import { getClubAbbreviation } from '../utils/clubLogos';
 import { usePageMeta } from '../hooks/usePageMeta';
+import { usePlayerDialog } from '../hooks/usePlayerDialog';
+import type { PlayerHint } from '../components/players/PlayerProfileView';
+import { cn } from '../utils/cn';
 
 const STATUS: Record<SeasonFixture['status'], FixtureStatus> = {
   scheduled: 'scheduled',
@@ -106,6 +109,22 @@ const TOP_PICKS_QUERY = {
   staleTime: 5 * 60_000,
 };
 
+/** A row or card that opens the player's stats overlay (a plain block outside the app shell). */
+function PlayerOpener({ player, className, children }: { player: PlayerHint; className?: string; children: ReactNode }) {
+  const dialog = usePlayerDialog();
+  if (!dialog) return <div className={className}>{children}</div>;
+  return (
+    <button
+      type="button"
+      onClick={() => dialog.openPlayer(player)}
+      title={`${player.name}: show stats`}
+      className={cn('w-full text-left transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent', className)}
+    >
+      {children}
+    </button>
+  );
+}
+
 function lastName(name: string) {
   return name.split(' ').slice(-1)[0] || name;
 }
@@ -122,7 +141,10 @@ function CaptainPick() {
   const oppLabel = opp ? `v ${getClubAbbreviation(opp.opponent_team) || opp.opponent_team} (${opp.home_away === 'home' ? 'H' : 'A'})` : null;
 
   return (
-    <div className="mt-6 flex max-w-xl items-center gap-4 rounded-lg border border-white/10 bg-black/25 p-4">
+    <PlayerOpener
+      player={{ name: top.player_name, team: top.team_name, photo: avatars[top.player_name], status: top.status, news: top.news, chance: top.chance_of_playing_next_round }}
+      className="mt-6 flex max-w-xl items-center gap-4 rounded-lg border border-white/10 bg-black/25 p-4"
+    >
       <PlayerAvatar name={top.player_name} src={avatars[top.player_name]} size={72} loading="eager" />
       <div className="min-w-0 flex-1">
         <p className="text-micro font-semibold uppercase text-accent">Model&rsquo;s captain pick</p>
@@ -145,7 +167,7 @@ function CaptainPick() {
           <abbr title="Predicted points" className="no-underline">xPts</abbr>
         </span>
       </div>
-    </div>
+    </PlayerOpener>
   );
 }
 
@@ -284,7 +306,11 @@ function TopPicks() {
           {players.map((p, i) => {
             const opp = p.fixture_context;
             return (
-              <li key={p.player_name} className="flex items-center gap-3 border-b border-line px-4 py-3 sm:[&:nth-child(odd)]:border-r">
+              <li key={p.player_name} className="border-b border-line sm:[&:nth-child(odd)]:border-r">
+                <PlayerOpener
+                  player={{ name: p.player_name, team: p.team_name, photo: avatars[p.player_name], status: p.status, news: p.news, chance: p.chance_of_playing_next_round }}
+                  className="flex items-center gap-3 px-4 py-3"
+                >
                 <span className="w-4 text-right text-data font-semibold tabular-nums text-fg-subtle">{i + 1}</span>
                 <PlayerAvatar name={p.player_name} src={avatars[p.player_name]} size={44} />
                 <span className="min-w-0 flex-1">
@@ -301,6 +327,7 @@ function TopPicks() {
                   <span className="block font-display text-h3 font-bold tabular-nums text-accent">{p.predicted_points.toFixed(1)}</span>
                   <span className="text-micro text-fg-subtle">pts</span>
                 </span>
+                </PlayerOpener>
               </li>
             );
           })}
@@ -332,7 +359,11 @@ function TeamNews() {
       ) : (
         <ul className="border-t border-line">
           {latest.map((p) => (
-            <li key={p.name} className="flex gap-3 border-b border-line px-4 py-3 last:border-0">
+            <li key={p.name} className="border-b border-line last:border-0">
+              <PlayerOpener
+                player={{ name: p.name, team: p.team, photo: p.photo, status: p.status, news: p.news, chance: p.chance_of_playing_next_round }}
+                className="flex gap-3 px-4 py-3"
+              >
               <PlayerAvatar name={p.name} src={p.photo} size={36} />
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1.5">
@@ -342,6 +373,7 @@ function TeamNews() {
                 </p>
                 <p className="mt-0.5 text-data text-fg-muted">{p.news}</p>
               </div>
+              </PlayerOpener>
             </li>
           ))}
         </ul>

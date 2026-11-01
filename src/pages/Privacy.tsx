@@ -40,7 +40,7 @@ export function Privacy() {
       eyebrow="Legal"
       title="Privacy policy"
       description="Pitch Me is a fan-made Fantasy Premier League project. It has no accounts and sets no cookies. Here is everything it does with data."
-      updated="31 October 2026"
+      updated="1 November 2026"
     >
       <ProseSection title="Your choices">
         <p>
@@ -112,7 +112,10 @@ export function Privacy() {
             <strong>Links to GitHub</strong> take you to GitHub, which has its own privacy policy.
           </li>
         </ul>
-        <p>Football data comes from the public Fantasy Premier League API; nothing about you is sent there.</p>
+        <p>
+          Football data comes from the public Fantasy Premier League API, and goal times from API-Football, both fetched
+          by our server; nothing about you is sent to either.
+        </p>
       </ProseSection>
 
       <ProseSection title="Contact">

@@ -113,7 +113,7 @@ export function Privacy() {
           </li>
         </ul>
         <p>
-          Football data comes from the public Fantasy Premier League API, and goal times from API-Football, both fetched
+          Football data comes from the public Fantasy Premier League API, and goal times from ESPN, both fetched
           by our server; nothing about you is sent to either.
         </p>
       </ProseSection>

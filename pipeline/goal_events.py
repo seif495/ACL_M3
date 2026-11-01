@@ -1,19 +1,21 @@
 """
-Goal minutes and penalties from API-Football (services/goal_events.py) for finished matches.
+Goal minutes and penalties from ESPN's scoreboard (services/goal_events.py) for finished matches.
 
-    python -m pipeline.goal_events --check             # what the key's plan covers (2-3 calls)
+    python -m pipeline.goal_events --check             # the last 10 days as ESPN shows them, saves nothing
     python -m pipeline.goal_events                     # this season's finished matches
-    python -m pipeline.goal_events --season 2025-26    # backfill a past season (as the plan allows)
+    python -m pipeline.goal_events --season 2025-26    # backfill a past season
 
-pipeline.daily runs `run` after the graph refresh. It never raises: without API_FOOTBALL_KEY it
-does nothing, and an API error (a season the plan doesn't cover, the day's limit) is reported in
-its summary while the match pages simply show goals without minutes.
+pipeline.daily runs `run` after the graph refresh. It never raises: an error (ESPN down or its
+format changed) is reported in the summary while match pages show FPL's scorers without minutes.
+GOAL_EVENTS=0 turns the step off.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from config.settings import CURRENT_SEASON
@@ -22,7 +24,7 @@ from services import goal_events as ge
 
 logger = logging.getLogger(__name__)
 
-MAX_CALLS = 30          # per run; the free plan allows 100 a day and the daily job runs 2-5 times
+MAX_CALLS = 40          # a week of matches per call: a whole season's backfill fits in one run
 
 
 def _fixtures(season: str):
@@ -39,38 +41,35 @@ def _fixtures(season: str):
 
 def run(live_dir: str = LIVE_DATA_DIR, season: str = CURRENT_SEASON, max_calls: int = MAX_CALLS,
         fixtures=None) -> Dict[str, Any]:
-    if not ge.api_key():
-        return {"skipped": "no API_FOOTBALL_KEY"}
+    if os.getenv("GOAL_EVENTS", "1").strip() == "0":
+        return {"skipped": "GOAL_EVENTS=0"}
     try:
         return ge.update(fixtures if fixtures is not None else _fixtures(season), season, live_dir, max_calls=max_calls)
-    except ge.ApiFootballError as exc:
-        logger.warning("API-Football: %s", exc)
-        return {"season": season, "error": str(exc)}
-    except Exception as exc:  # network and the like: try again next run
+    except Exception as exc:  # network, a changed format: try again next run
         logger.warning("Goal events step failed: %s", exc)
         return {"season": season, "error": f"{type(exc).__name__}: {exc}"}
 
 
-def check(season: str = CURRENT_SEASON) -> Dict[str, Any]:
-    """The account's plan and today's usage, then whether `season` is covered and whether a
-    finished match comes with goal events (minute, penalty)."""
-    out: Dict[str, Any] = {"season": season}
-    status = ge.http_get("status", {}).get("response") or {}
-    out["plan"] = (status.get("subscription") or {}).get("plan")
-    out["requests_today"] = status.get("requests")
-    try:
-        fixtures = ge.api_fixtures(ge.http_get("fixtures", {"league": ge.PREMIER_LEAGUE, "season": ge.season_year(season)}))
-    except ge.ApiFootballError as exc:
-        out["season_covered"] = False
-        out["error"] = str(exc)
-        return out
-    done = [f for f in fixtures if f["status"] in ("FT", "AET", "PEN")]
-    out.update(season_covered=bool(fixtures), matches=len(fixtures), finished=len(done))
-    if done:
-        sample = ge.api_fixtures(ge.http_get("fixtures", {"ids": str(done[-1]["api_id"])}))
-        if sample:
-            goals = ge.goal_rows(sample[0]["events"] or [], [sample[0]["home"], sample[0]["away"]])
-            out["sample"] = {"match": f"{sample[0]['home']} v {sample[0]['away']}", "goals": goals}
+def check(days: int = 10) -> Dict[str, Any]:
+    """The last `days` days of Premier League matches on ESPN's scoreboard, how each one's goals
+    parse, and one match's raw details, to see the feed's format."""
+    end = datetime.now(timezone.utc).date()
+    data = ge.http_get({"dates": f"{end - timedelta(days=days):%Y%m%d}-{end:%Y%m%d}", "limit": 200})
+    matches = ge.espn_matches(data)
+    done = [m for m in matches if m["completed"]]
+    out: Dict[str, Any] = {"matches": len(matches), "finished": len(done), "parsed": []}
+    for m in done:
+        rows = ge.goal_rows(m, m["home"], m["away"])
+        out["parsed"].append({
+            "match": f"{m['home']} {m['home_score']}-{m['away_score']} {m['away']}",
+            "goals": None if rows is None else [
+                f"{r['player']} {r['minute']}{'+' + str(r['extra']) if r['extra'] else ''}' {r['kind']} ({r['team']})"
+                for r in rows],
+        })
+    sample = next((m for m in reversed(done) if any(d.get("ownGoal") or d.get("penaltyKick") for d in m["details"])),
+                  done[-1] if done else None)
+    if sample:
+        out["raw_details_sample"] = {"match": f"{sample['home']} v {sample['away']}", "details": sample["details"]}
     return out
 
 
@@ -78,14 +77,11 @@ def main(argv: Optional[list] = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--season", default=CURRENT_SEASON)
-    p.add_argument("--check", action="store_true", help="show what the plan covers, fetch nothing to disk")
+    p.add_argument("--check", action="store_true", help="show the last 10 days as ESPN has them, save nothing")
     p.add_argument("--max-calls", type=int, default=MAX_CALLS)
     args = p.parse_args(argv)
-    if not ge.api_key():
-        print("API_FOOTBALL_KEY isn't set")
-        return 1
-    result = check(args.season) if args.check else run(season=args.season, max_calls=args.max_calls)
-    print(json.dumps(result, indent=2, default=str))
+    result = check() if args.check else run(season=args.season, max_calls=args.max_calls)
+    print(json.dumps(result, indent=2, default=str, ensure_ascii=False))
     return 0 if "error" not in result else 1
 
 

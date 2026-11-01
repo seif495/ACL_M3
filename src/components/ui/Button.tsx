@@ -7,7 +7,9 @@ type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 type Size = 'sm' | 'md' | 'lg';
 
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-accent text-accent-on hover:bg-accent/90 font-semibold',
+  // Mint into cyan, with a soft glow on hover
+  primary:
+    'bg-accent bg-gradient-to-r from-accent to-accent-2 text-accent-on font-semibold shadow-[0_6px_18px_-8px_rgb(var(--accent)/0.6)] hover:shadow-[0_8px_26px_-6px_rgb(var(--accent-2)/0.6)] hover:brightness-105',
   secondary: 'bg-surface-2 text-fg border border-line-strong hover:bg-brand-2/60',
   ghost: 'bg-transparent text-fg-muted hover:bg-surface-2 hover:text-fg',
   danger: 'bg-danger text-white hover:bg-danger/90 font-semibold',
@@ -20,7 +22,7 @@ const SIZES: Record<Size, string> = {
 };
 
 const BASE =
-  'inline-flex select-none items-center justify-center rounded-md transition-colors duration-150 ' +
+  'inline-flex select-none items-center justify-center rounded-md transition duration-150 ' +
   'disabled:cursor-not-allowed disabled:opacity-50';
 
 export function buttonClasses(variant: Variant = 'primary', size: Size = 'md', className?: string) {

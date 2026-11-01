@@ -109,7 +109,7 @@ export function SiteHeader({ onOpenSearch, activePath }: SiteHeaderProps) {
                   <span
                     aria-hidden="true"
                     className={cn(
-                      'absolute inset-x-3 bottom-0 h-[3px] rounded-t-sm bg-accent transition-transform',
+                      'absolute inset-x-3 bottom-0 h-[3px] rounded-t-sm bg-gradient-to-r from-accent to-accent-2 transition-transform',
                       active ? 'scale-x-100' : 'scale-x-0',
                     )}
                   />
@@ -130,7 +130,7 @@ export function SiteHeader({ onOpenSearch, activePath }: SiteHeaderProps) {
               >
                 More
                 <ChevronDown className={cn('h-4 w-4 transition-transform', moreOpen && 'rotate-180')} aria-hidden="true" />
-                {moreActive && <span aria-hidden="true" className="absolute inset-x-3 bottom-0 h-[3px] rounded-t-sm bg-accent" />}
+                {moreActive && <span aria-hidden="true" className="absolute inset-x-3 bottom-0 h-[3px] rounded-t-sm bg-gradient-to-r from-accent to-accent-2" />}
               </button>
               {moreOpen && (
                 <ul

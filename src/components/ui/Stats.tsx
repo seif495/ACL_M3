@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { useCountUp } from '../../hooks/useCountUp';
 import { cn } from '../../utils/cn';
 
 interface StatCardProps {
@@ -12,17 +13,44 @@ interface StatCardProps {
   className?: string;
 }
 
+/** A whole number or a decimal ("66.7") counts up when it first appears; anything else shows as is. */
+function CountingValue({ value }: { value: ReactNode }) {
+  const text = typeof value === 'number' ? String(value) : typeof value === 'string' ? value : null;
+  const match = text != null ? /^(-?)(\d{1,3}(?:,\d{3})*|\d+)(\.\d+)?$/.exec(text.trim()) : null;
+  const target = match ? Number(text!.replace(/,/g, '')) : NaN;
+  const decimals = match?.[3] ? match[3].length - 1 : 0;
+  const grouped = !!match && text!.includes(',');
+  const [ref, shown] = useCountUp<HTMLSpanElement>(target);
+  if (!match) return <>{value}</>;
+  const display = grouped
+    ? Math.round(shown).toLocaleString()
+    : shown.toFixed(decimals);
+  return (
+    <span ref={ref}>
+      <span aria-hidden="true">{display}</span>
+      <span className="sr-only">{text}</span>
+    </span>
+  );
+}
+
 export function StatCard({ label, value, detail, icon, highlight, className }: StatCardProps) {
   return (
-    <div className={cn('rounded-lg border border-line bg-surface p-4', className)}>
-      <div className="flex items-center justify-between gap-2">
+    <div className={cn('surface-sheen relative overflow-hidden rounded-lg border border-line bg-surface p-4 shadow-card', className)}>
+      {highlight && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full blur-2xl"
+          style={{ background: 'rgb(var(--accent) / 0.16)' }}
+        />
+      )}
+      <div className="relative flex items-center justify-between gap-2">
         <p className="text-micro font-semibold uppercase text-fg-subtle">{label}</p>
         {icon && <span className="text-fg-subtle">{icon}</span>}
       </div>
-      <p className={cn('mt-1 font-display text-h1 font-bold tabular-nums', highlight ? 'text-accent' : 'text-fg')}>
-        {value}
+      <p className={cn('relative mt-1 font-display text-h1 font-bold tabular-nums', highlight ? 'text-gradient' : 'text-fg')}>
+        <CountingValue value={value} />
       </p>
-      {detail && <p className="mt-0.5 truncate text-data text-fg-muted">{detail}</p>}
+      {detail && <p className="relative mt-0.5 truncate text-data text-fg-muted">{detail}</p>}
     </div>
   );
 }

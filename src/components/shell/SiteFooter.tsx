@@ -13,7 +13,8 @@ const LEGAL_NAV = [
 export function SiteFooter() {
   return (
     // pb-20 on phones/tablets keeps the floating "Ask AI" button off the last line
-    <footer className="mt-12 border-t border-line bg-surface pb-20 lg:pb-0">
+    <footer className="relative mt-12 border-t border-line bg-surface pb-20 lg:pb-0">
+      <div aria-hidden="true" className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-accent/60 to-transparent" />
       <div className="mx-auto grid w-full max-w-page gap-8 px-4 py-8 sm:px-6 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
         <div>
           <Logo size={24} />

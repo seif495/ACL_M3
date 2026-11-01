@@ -205,7 +205,7 @@ def _surname(name: str) -> str:
 
 
 def _match_player(api_name: Optional[str], players: List[Dict[str, Any]]) -> Optional[str]:
-    """Our player for an API-Football name: the same surname (or a name word) on that side."""
+    """Our player for a goal-events name (ESPN's): the same surname (or a name word) on that side."""
     if not api_name:
         return None
     from utils.text import normalize_name
@@ -300,7 +300,7 @@ def match_page(conn, fixture_id: str, *,
     payload: Dict[str, Any] = {
         **fixture, "live": live_info,
         "summary": summarize(fixture, raw) if played else None,
-        # Goal minutes and penalties (API-Football via the daily job); null until fetched
+        # Goal minutes and penalties (ESPN's scoreboard via the daily job); null until fetched
         "goals": timeline(events, fixture, [player_row(r) for r in raw]) if events is not None else None,
         "form": {"home": form_before(fixtures, fixture["home_team"], f.get("kickoff_time")),
                  "away": form_before(fixtures, fixture["away_team"], f.get("kickoff_time"))},

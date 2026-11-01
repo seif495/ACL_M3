@@ -1,4 +1,4 @@
-"""Shared test setup: no test reaches FPL's live feed, API-Football or the Guardian."""
+"""Shared test setup: no test reaches FPL's live feed, ESPN or the Guardian."""
 import os
 import sys
 
@@ -15,8 +15,9 @@ def _no_live_fpl(monkeypatch):
         raise RuntimeError(f"tests don't call FPL ({path})")
 
     monkeypatch.setattr(live_points, "_http_get", offline)
-    # No test reaches API-Football or the Guardian with a developer's real keys
-    monkeypatch.delenv("API_FOOTBALL_KEY", raising=False)
+    from services import goal_events
+    monkeypatch.setattr(goal_events, "http_get", offline)
+    # No test reaches the Guardian with a developer's real key
     monkeypatch.delenv("GUARDIAN_API_KEY", raising=False)
     live_points.clear_cache()
     yield

@@ -20,7 +20,7 @@ const minute = (g: MatchGoal) => (g.minute == null ? '' : ` ${g.minute}${g.extra
 const KIND_NOTE: Record<MatchGoal['kind'], string> = { goal: '', penalty: ' (pen)', own_goal: ' (og)', missed_penalty: ' (pen missed)' };
 const KIND_WORD: Record<MatchGoal['kind'], string> = { goal: 'Goal', penalty: 'Penalty', own_goal: 'Own goal', missed_penalty: 'Penalty missed' };
 
-/** A side's goals under its crest: with minutes and penalties when API-Football's events are
+/** A side's goals under its crest: with minutes and penalties when ESPN's events are
  * in (`goals`), else FPL's scorers; then red cards. */
 function Events({ side, goals, align }: { side: MatchSide; goals?: MatchGoal[] | null; align: 'left' | 'right' }) {
   const goalLines = goals

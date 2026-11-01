@@ -22,6 +22,11 @@ import {
 } from '../components/ui';
 import { getClubAbbreviation } from '../utils/clubLogos';
 import { usePageMeta } from '../hooks/usePageMeta';
+import { matchPath, teamPath } from '../utils/clubColors';
+import { NewsSection } from '../components/news/NewsSection';
+import { usePlayerDialog } from '../hooks/usePlayerDialog';
+import type { PlayerHint } from '../components/players/PlayerProfileView';
+import { cn } from '../utils/cn';
 
 const STATUS: Record<SeasonFixture['status'], FixtureStatus> = {
   scheduled: 'scheduled',
@@ -106,6 +111,22 @@ const TOP_PICKS_QUERY = {
   staleTime: 5 * 60_000,
 };
 
+/** A row or card that opens the player's stats overlay (a plain block outside the app shell). */
+function PlayerOpener({ player, className, children }: { player: PlayerHint; className?: string; children: ReactNode }) {
+  const dialog = usePlayerDialog();
+  if (!dialog) return <div className={className}>{children}</div>;
+  return (
+    <button
+      type="button"
+      onClick={() => dialog.openPlayer(player)}
+      title={`${player.name}: show stats`}
+      className={cn('w-full text-left transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent', className)}
+    >
+      {children}
+    </button>
+  );
+}
+
 function lastName(name: string) {
   return name.split(' ').slice(-1)[0] || name;
 }
@@ -122,7 +143,10 @@ function CaptainPick() {
   const oppLabel = opp ? `v ${getClubAbbreviation(opp.opponent_team) || opp.opponent_team} (${opp.home_away === 'home' ? 'H' : 'A'})` : null;
 
   return (
-    <div className="mt-6 flex max-w-xl items-center gap-4 rounded-lg border border-white/10 bg-black/25 p-4">
+    <PlayerOpener
+      player={{ name: top.player_name, team: top.team_name, photo: avatars[top.player_name], status: top.status, news: top.news, chance: top.chance_of_playing_next_round }}
+      className="mt-6 flex max-w-xl items-center gap-4 rounded-xl border border-white/10 bg-black/30 p-4 shadow-pop backdrop-blur-sm"
+    >
       <PlayerAvatar name={top.player_name} src={avatars[top.player_name]} size={72} loading="eager" />
       <div className="min-w-0 flex-1">
         <p className="text-micro font-semibold uppercase text-accent">Model&rsquo;s captain pick</p>
@@ -145,7 +169,7 @@ function CaptainPick() {
           <abbr title="Predicted points" className="no-underline">xPts</abbr>
         </span>
       </div>
-    </div>
+    </PlayerOpener>
   );
 }
 
@@ -159,16 +183,51 @@ function Hero() {
 
   // The countdown lives in the deadline bar on every page; the hero leads with the model's pick.
   return (
-    <section
-      aria-labelledby="home-title"
-      className="border-b border-line"
-      style={{ backgroundImage: 'linear-gradient(135deg, rgb(var(--brand)) 0%, rgb(var(--bg)) 70%)' }}
-    >
-      <Container className="grid grid-cols-1 gap-6 py-8 sm:py-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-center">
+    <section aria-labelledby="home-title" className="relative isolate overflow-hidden border-b border-line bg-brand">
+      {/* Mesh of the site's lights over the brand purple */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 -z-10"
+        style={{
+          background:
+            'radial-gradient(45rem 28rem at 8% 0%, rgb(var(--accent) / 0.22), transparent 60%),' +
+            'radial-gradient(40rem 26rem at 95% 10%, rgb(var(--accent-2) / 0.2), transparent 60%),' +
+            'radial-gradient(50rem 30rem at 60% 130%, rgb(var(--glow-3) / 0.28), transparent 60%),' +
+            'linear-gradient(160deg, rgb(var(--brand)) 0%, rgb(var(--bg)) 85%)',
+        }}
+      />
+      {/* Faint pitch markings */}
+      <svg
+        aria-hidden="true"
+        className="absolute -right-24 top-1/2 -z-10 h-[34rem] w-[52rem] -translate-y-1/2 opacity-[0.07]"
+        viewBox="0 0 160 100"
+        fill="none"
+        stroke="white"
+        strokeWidth="0.6"
+      >
+        <rect x="2" y="2" width="156" height="96" rx="1" />
+        <line x1="80" y1="2" x2="80" y2="98" />
+        <circle cx="80" cy="50" r="13" />
+        <circle cx="80" cy="50" r="0.8" fill="white" />
+        <rect x="2" y="26" width="22" height="48" />
+        <rect x="2" y="38" width="8" height="24" />
+        <rect x="136" y="26" width="22" height="48" />
+        <rect x="150" y="38" width="8" height="24" />
+        <path d="M24 42 a10 10 0 0 1 0 16" />
+        <path d="M136 42 a10 10 0 0 0 0 16" />
+      </svg>
+      <div aria-hidden="true" className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-accent-2/50 to-transparent" />
+      <Container className="grid grid-cols-1 gap-6 py-10 sm:py-14 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-center">
         <div>
           <p className="text-micro font-semibold uppercase text-accent">{season?.season ?? 'Fantasy Premier League'}</p>
-          <h1 id="home-title" className="mt-1 font-display text-h1 font-extrabold text-fg sm:text-display">
-            {gw ? `Gameweek ${gw}` : 'Pitch Me'}
+          <h1 id="home-title" className="mt-1 font-display text-[2.5rem] font-extrabold leading-[1.05] tracking-tight text-fg sm:text-[3.5rem]">
+            {gw ? (
+              <>
+                Gameweek <span className="text-gradient">{gw}</span>
+              </>
+            ) : (
+              'Pitch Me'
+            )}
           </h1>
           <p className="mt-1 max-w-lg text-body text-fg-muted">
             Model picks, fixtures and team news for the next deadline.
@@ -214,6 +273,7 @@ function NextFixtures() {
               awayScore={f.away_score}
               kickoff={f.kickoff_time}
               status={STATUS[f.status]}
+              to={matchPath(f.id)}
               showDay
             />
           ))}
@@ -252,8 +312,10 @@ function MiniTable() {
                 <td className="px-4 py-2">
                   <span className="flex items-center gap-2">
                     <span className="w-5 text-right tabular-nums text-fg-subtle">{r.position}</span>
-                    <ClubCrest team={r.team} size={18} />
-                    <span className="truncate font-semibold text-fg">{r.team}</span>
+                    <Link to={teamPath(r.team)} className="flex min-w-0 items-center gap-2 hover:text-accent">
+                      <ClubCrest team={r.team} size={18} />
+                      <span className="truncate font-semibold text-fg hover:text-accent">{r.team}</span>
+                    </Link>
                   </span>
                 </td>
                 <td className="px-2 py-2 text-right tabular-nums text-fg-muted">{r.played}</td>
@@ -280,11 +342,15 @@ function TopPicks() {
       ) : isError ? (
         <ErrorState title="Predictions unavailable" onRetry={() => refetch()} />
       ) : (
-        <ol className="grid border-t border-line sm:grid-cols-2">
+        <ol className="grid grid-cols-1 border-t border-line sm:grid-cols-2">
           {players.map((p, i) => {
             const opp = p.fixture_context;
             return (
-              <li key={p.player_name} className="flex items-center gap-3 border-b border-line px-4 py-3 sm:[&:nth-child(odd)]:border-r">
+              <li key={p.player_name} className="border-b border-line sm:[&:nth-child(odd)]:border-r">
+                <PlayerOpener
+                  player={{ name: p.player_name, team: p.team_name, photo: avatars[p.player_name], status: p.status, news: p.news, chance: p.chance_of_playing_next_round }}
+                  className="flex items-center gap-3 px-4 py-3"
+                >
                 <span className="w-4 text-right text-data font-semibold tabular-nums text-fg-subtle">{i + 1}</span>
                 <PlayerAvatar name={p.player_name} src={avatars[p.player_name]} size={44} />
                 <span className="min-w-0 flex-1">
@@ -301,6 +367,7 @@ function TopPicks() {
                   <span className="block font-display text-h3 font-bold tabular-nums text-accent">{p.predicted_points.toFixed(1)}</span>
                   <span className="text-micro text-fg-subtle">pts</span>
                 </span>
+                </PlayerOpener>
               </li>
             );
           })}
@@ -332,7 +399,11 @@ function TeamNews() {
       ) : (
         <ul className="border-t border-line">
           {latest.map((p) => (
-            <li key={p.name} className="flex gap-3 border-b border-line px-4 py-3 last:border-0">
+            <li key={p.name} className="border-b border-line last:border-0">
+              <PlayerOpener
+                player={{ name: p.name, team: p.team, photo: p.photo, status: p.status, news: p.news, chance: p.chance_of_playing_next_round }}
+                className="flex gap-3 px-4 py-3"
+              >
               <PlayerAvatar name={p.name} src={p.photo} size={36} />
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1.5">
@@ -342,6 +413,7 @@ function TeamNews() {
                 </p>
                 <p className="mt-0.5 text-data text-fg-muted">{p.news}</p>
               </div>
+              </PlayerOpener>
             </li>
           ))}
         </ul>
@@ -358,14 +430,18 @@ export function Home() {
       {/* Two independent columns, so cards keep their natural height (rows of paired cards
           stretched the shorter one and left empty blocks). */}
       <Container className="grid items-start gap-5 py-6 lg:grid-cols-3">
-        <div className="space-y-5 lg:col-span-2">
+        <div className="min-w-0 space-y-5 lg:col-span-2">
           <NextFixtures />
           <TopPicks />
         </div>
-        <div className="space-y-5">
+        <div className="min-w-0 space-y-5">
           <MiniTable />
           <TeamNews />
         </div>
+      </Container>
+      <Container className="pb-8">
+        {/* Team news is already in the column above; here, headlines and price changes */}
+        <NewsSection title="Latest news" showUpdates={false} articles={7} />
       </Container>
     </>
   );

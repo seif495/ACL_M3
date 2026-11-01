@@ -16,6 +16,7 @@ import {
   type FixtureStatus,
 } from '../components/ui';
 import { usePageMeta } from '../hooks/usePageMeta';
+import { matchPath } from '../utils/clubColors';
 
 const STATUS: Record<SeasonFixture['status'], FixtureStatus> = {
   scheduled: 'scheduled',
@@ -149,6 +150,7 @@ export function Fixtures() {
                   awayScore={f.away_score}
                   kickoff={f.kickoff_time}
                   status={STATUS[f.status]}
+              to={matchPath(f.id)}
                 />
               ))}
             </Card>

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiService, handleApiError, type TableRow } from '../services/api';
 import { Card, ClubCrest, Container, DataTable, ErrorState, PageHeader, type Column } from '../components/ui';
 import { getClubAbbreviation } from '../utils/clubLogos';
+import { FormChips, TeamLink } from '../components/teams/MatchBits';
 import { cn } from '../utils/cn';
 import { usePageMeta } from '../hooks/usePageMeta';
 
@@ -82,13 +83,7 @@ export function LeagueTable() {
       key: 'team',
       header: 'Club',
       sticky: true,
-      render: (r) => (
-        <span className="flex items-center gap-2 font-semibold">
-          <ClubCrest team={r.team} size={22} />
-          <span className="hidden sm:inline">{r.team}</span>
-          <span className="sm:hidden">{getClubAbbreviation(r.team) || r.team}</span>
-        </span>
-      ),
+      render: (r) => <TeamLink team={r.team} short />,
     },
     { key: 'played', header: 'Pl', description: 'Played', align: 'right' },
     { key: 'won', header: 'W', description: 'Won', align: 'right', hideBelow: 'sm' },
@@ -110,7 +105,13 @@ export function LeagueTable() {
       align: 'right',
       render: (r) => <span className="font-bold text-fg">{r.points}</span>,
     },
-    { key: 'form', header: 'Form', hideBelow: 'lg', render: (r) => <Form results={r.form} /> },
+    {
+      key: 'form',
+      header: 'Form',
+      hideBelow: 'lg',
+      // Each chip opens its match page; older backends send only the letters.
+      render: (r) => (r.recent?.length ? <FormChips items={r.recent} size="sm" /> : <Form results={r.form} />),
+    },
     {
       key: 'next',
       header: 'Next',

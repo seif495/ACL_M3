@@ -996,6 +996,8 @@ class TableRow(BaseModel):
     goal_difference: int
     points: int
     form: List[str]
+    # The form's matches: fixture_id (for the match page), result, home, score, opponent
+    recent: List[Dict[str, Any]] = Field(default_factory=list)
     next_fixture: Optional[TableNextFixture] = None
 
 
@@ -2619,6 +2621,62 @@ def ml_manager_endpoint():
 def clubs(season: str = Query(CURRENT_SEASON, max_length=16), conn=Depends(get_neo4j_conn)):
     """The clubs with players in a season, A-Z, for the tables' club filters."""
     return _season_call(season_service.get_clubs, conn, season)
+
+
+def _predicted_by_name() -> Dict[str, float]:
+    """Next gameweek's predicted points by player name (empty without a predictions file)."""
+    df = get_predictions_df()
+    if df is None or not len(df):
+        return {}
+    return {str(n): round(float(v), 1) for n, v in df.groupby("name")["predicted_points"].sum().items()}
+
+
+@app.get("/api/teams")
+def teams_index(season: str = Query(CURRENT_SEASON, max_length=16), conn=Depends(get_neo4j_conn)):
+    """Every club of a season with its table row and slug (services/teams.py)."""
+    from services import teams
+    try:
+        return _season_call(teams.teams_index, conn, season)
+    except teams.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/api/teams/{slug}")
+def team_detail(slug: str, season: str = Query(CURRENT_SEASON, max_length=16), conn=Depends(get_neo4j_conn)):
+    """One club's season: standing, form, results and fixtures (with match ids), position by
+    gameweek, goals and xG, squad and top scorers (services/teams.py). Unknown club -> 404."""
+    from services import teams
+    if not re.fullmatch(r"[a-z0-9-]{2,40}", slug):
+        raise HTTPException(status_code=404, detail="No such club")
+    try:
+        return _season_call(teams.team_page, conn, slug, season, photo_for=_photo_for,
+                            predicted_for=_predicted_by_name)
+    except teams.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/api/matches/{fixture_id}")
+def match_detail(fixture_id: str, conn=Depends(get_neo4j_conn)):
+    """One match of any season (services/matches.py): score, scorers, cards, bonus, xG and
+    line-ups with FPL points once played (FPL's live points while it's on); before kickoff,
+    form, last meetings and predicted players. Unknown fixture -> 404."""
+    from services import matches
+    if not re.fullmatch(r"[A-Za-z0-9-]{3,40}", fixture_id):
+        raise HTTPException(status_code=404, detail="No such match")
+    try:
+        return _season_call(matches.match_page, conn, fixture_id, photo_for=_photo_for,
+                            predictions=get_predictions_df, live=_live_points())
+    except matches.NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/api/news")
+def news(team: Optional[str] = Query(None, max_length=40)):
+    """Guardian football headlines (GUARDIAN_API_KEY; cached, with a daily budget and the last
+    good answer as fallback) and FPL news from our own data: availability updates and price
+    changes (services/news.py). `team` is a club's graph name."""
+    from services import news as news_service
+    return news_service.get_news(team, photo_for=_photo_for)
 
 
 @app.get("/api/players/leaders", response_model=PlayerLeadersResponse)

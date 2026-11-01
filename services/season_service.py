@@ -313,7 +313,7 @@ def compute_table(fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     teams = sorted({f["home_team"] for f in fixtures} | {f["away_team"] for f in fixtures})
     stats = {t: {"played": 0, "won": 0, "drawn": 0, "lost": 0, "goals_for": 0, "goals_against": 0,
-                 "results": [], "next": None} for t in teams}
+                 "results": [], "recent": [], "next": None} for t in teams}
 
     played = [f for f in fixtures if f["home_score"] is not None and f["away_score"] is not None
               and f["status"] != "scheduled"]
@@ -328,6 +328,9 @@ def compute_table(fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             result = "W" if gf > ga else ("D" if gf == ga else "L")
             s[{"W": "won", "D": "drawn", "L": "lost"}[result]] += 1
             s["results"].append(result)
+            home = team == f["home_team"]
+            s["recent"].append({"fixture_id": f["id"], "result": result, "home": home, "score": f"{gf}-{ga}",
+                                "opponent": f["away_team"] if home else f["home_team"]})
 
     upcoming = sorted((f for f in fixtures if f["status"] == "scheduled"),
                       key=lambda f: (_kickoff_key(f), f["home_team"]))
@@ -347,6 +350,8 @@ def compute_table(fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "goal_difference": s["goals_for"] - s["goals_against"],
             "points": 3 * s["won"] + s["drawn"],
             "form": s["results"][-FORM_LENGTH:],
+            # the same matches, for links to their match pages
+            "recent": s["recent"][-FORM_LENGTH:],
             "next_fixture": s["next"],
         })
     rows.sort(key=lambda r: (-r["points"], -r["goal_difference"], -r["goals_for"], r["team"]))

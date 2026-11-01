@@ -252,6 +252,15 @@ def run_daily(live_dir: str = LIVE_DATA_DIR, force: bool = False, retrain: bool 
         summary["ml_manager"] = "failed"
         logger.error("ML manager step failed:\n%s", errors[-1][1])
 
+    # Goal minutes and penalties for match pages (API-Football; nothing without a key). It never
+    # raises and isn't a problem the healthcheck reports: pages show goals without minutes.
+    try:
+        from pipeline.goal_events import run as run_goal_events
+        summary["goal_events"] = run_goal_events(live_dir)
+    except Exception as exc:
+        summary["goal_events"] = f"failed: {exc}"
+        logger.warning("Goal events step failed: %s", exc)
+
     summary["backend_reload"] = _reload_backend()
     summary["seconds"] = round(time.time() - started, 1)
     problems = run_problems(summary)

@@ -21,6 +21,9 @@ const loadModelInsights = () => import('./pages/ModelInsights').then((m) => ({ d
 const loadPrivacy = () => import('./pages/Privacy').then((m) => ({ default: m.Privacy }));
 const loadTerms = () => import('./pages/Terms').then((m) => ({ default: m.Terms }));
 const loadContact = () => import('./pages/Contact').then((m) => ({ default: m.Contact }));
+const loadTeams = () => import('./pages/Teams').then((m) => ({ default: m.Teams }));
+const loadTeamPage = () => import('./pages/TeamPage').then((m) => ({ default: m.TeamPage }));
+const loadMatchPage = () => import('./pages/MatchPage').then((m) => ({ default: m.MatchPage }));
 const loadSiteStats = () => import('./pages/SiteStats').then((m) => ({ default: m.SiteStats }));
 const loadDesignSystem = () => import('./pages/DesignSystem').then((m) => ({ default: m.DesignSystem }));
 
@@ -39,6 +42,9 @@ const Privacy = lazy(loadPrivacy);
 const Terms = lazy(loadTerms);
 const Contact = lazy(loadContact);
 const SiteStats = lazy(loadSiteStats);
+const Teams = lazy(loadTeams);
+const TeamPage = lazy(loadTeamPage);
+const MatchPage = lazy(loadMatchPage);
 const DesignSystem = lazy(loadDesignSystem);
 
 const queryClient = new QueryClient({
@@ -66,7 +72,7 @@ function App() {
   // Warm the remaining route chunks once the browser is idle so later navigation is instant.
   useEffect(() => {
     const preload = () => {
-      [loadHome, loadFixtures, loadLeagueTable, loadTeamOfTheWeek, loadQAAssistant, loadPredictions, loadModelInsights, loadPlayerSearch, loadPlayerComparison, loadTrivia, loadSettings].forEach((load) => {
+      [loadHome, loadFixtures, loadLeagueTable, loadTeams, loadTeamPage, loadMatchPage, loadTeamOfTheWeek, loadQAAssistant, loadPredictions, loadModelInsights, loadPlayerSearch, loadPlayerComparison, loadTrivia, loadSettings].forEach((load) => {
         void load().catch(() => undefined);
       });
     };
@@ -92,6 +98,9 @@ function App() {
             <Route index element={<Page><Home /></Page>} />
             <Route path="fixtures" element={<Page><Fixtures /></Page>} />
             <Route path="table" element={<Page><LeagueTable /></Page>} />
+            <Route path="teams" element={<Page><Teams /></Page>} />
+            <Route path="teams/:slug" element={<Page><TeamPage /></Page>} />
+            <Route path="matches/:id" element={<Page><MatchPage /></Page>} />
             <Route path="team-of-the-week" element={<Page><TeamOfTheWeek /></Page>} />
             <Route path="assistant" element={<Page><QAAssistant /></Page>} />
             <Route path="players" element={<Page><PlayerSearch /></Page>} />

@@ -29,6 +29,7 @@ const SITEMAP_ROUTES: { path: string; changefreq: 'daily' | 'weekly' | 'monthly'
   { path: '/', changefreq: 'daily', priority: 1.0 },
   { path: '/fixtures', changefreq: 'daily', priority: 0.9 },
   { path: '/table', changefreq: 'daily', priority: 0.9 },
+  { path: '/teams', changefreq: 'daily', priority: 0.8 },
   { path: '/predictions', changefreq: 'daily', priority: 0.9 },
   { path: '/team-of-the-week', changefreq: 'daily', priority: 0.8 },
   { path: '/players', changefreq: 'daily', priority: 0.8 },

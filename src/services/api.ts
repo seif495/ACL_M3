@@ -524,7 +524,216 @@ export interface TableRow {
   goal_difference: number;
   points: number;
   form: Array<'W' | 'D' | 'L'>;
+  /** The form's matches, for links to their match pages (older backends omit it). */
+  recent?: { fixture_id: string; result: 'W' | 'D' | 'L'; home: boolean; score: string; opponent: string }[];
   next_fixture: { opponent: string; home: boolean; kickoff_time: string | null } | null;
+}
+
+/** One match from a club's side (team pages, match-page form). */
+export interface TeamMatch {
+  fixture_id: string;
+  gameweek: number | null;
+  kickoff_time: string | null;
+  status: string;
+  opponent: string;
+  home: boolean;
+  goals_for: number | null;
+  goals_against: number | null;
+  score: string | null;
+  result: 'W' | 'D' | 'L' | null;
+  difficulty: number | null;
+  xg_for: number | null;
+  xg_against: number | null;
+}
+
+export interface TeamSquadPlayer {
+  name: string;
+  web_name: string | null;
+  position: PositionCode | null;
+  status: string | null;
+  news: string | null;
+  chance_of_playing_next_round: number | null;
+  total_points: number;
+  goals: number;
+  assists: number;
+  minutes: number;
+  appearances: number;
+  clean_sheets: number;
+  bonus: number;
+  price: number | null;
+  predicted_points: number | null;
+  photo: string | null;
+}
+
+export interface TeamLeader {
+  name: string;
+  web_name: string | null;
+  position: PositionCode | null;
+  value: number;
+  photo: string | null;
+}
+
+export interface TeamPageResponse {
+  season: string;
+  team: string;
+  slug: string;
+  standing: TableRow | null;
+  teams_in_table: number;
+  form: TeamMatch[];
+  results: TeamMatch[];
+  fixtures: TeamMatch[];
+  position_history: { gameweek: number; position: number; points: number }[];
+  stats: {
+    played: number;
+    goals_for: number;
+    goals_against: number;
+    clean_sheets: number;
+    failed_to_score: number;
+    xg_for: number | null;
+    xg_against: number | null;
+    xg_matches: number;
+    home: { won: number; drawn: number; lost: number };
+    away: { won: number; drawn: number; lost: number };
+    biggest_win: TeamMatch | null;
+  };
+  squad: TeamSquadPlayer[];
+  top_scorers: TeamLeader[];
+  top_assists: TeamLeader[];
+}
+
+export interface TeamsIndexResponse {
+  season: string;
+  teams: (TableRow & { slug: string })[];
+}
+
+export interface MatchPlayer {
+  name: string;
+  team: string | null;
+  position: PositionCode | null;
+  minutes: number;
+  started: boolean;
+  points: number;
+  goals: number;
+  assists: number;
+  yellow_cards: number;
+  red_cards: number;
+  own_goals: number;
+  penalties_missed: number;
+  penalties_saved: number;
+  saves: number;
+  bonus: number;
+  bps: number;
+  xg: number | null;
+  xa: number | null;
+  defensive_contribution: number | null;
+  photo: string | null;
+}
+
+export interface MatchEvent {
+  name: string;
+  count: number;
+}
+
+export interface MatchSide {
+  scorers: MatchEvent[];
+  assists: MatchEvent[];
+  /** Own goals by the other side, which count for this one. */
+  own_goals_for: MatchEvent[];
+  yellow_cards: MatchEvent[];
+  red_cards: MatchEvent[];
+  penalties_missed: MatchEvent[];
+  penalties_saved: MatchEvent[];
+  xg: number | null;
+  points: number;
+  starters: MatchPlayer[];
+  substitutes: MatchPlayer[];
+  unused: MatchPlayer[];
+}
+
+export interface MatchGoal {
+  minute: number | null;
+  extra: number | null;
+  kind: 'goal' | 'penalty' | 'own_goal' | 'missed_penalty';
+  /** Our player's name when matched, else API-Football's ("C. Palmer"). */
+  player: string | null;
+  assist: string | null;
+}
+
+export interface MatchPageResponse {
+  id: string;
+  season: string;
+  gameweek: number | null;
+  kickoff_time: string | null;
+  status: 'scheduled' | 'in_progress' | 'finished' | string;
+  home_team: string;
+  away_team: string;
+  home_score: number | null;
+  away_score: number | null;
+  home_difficulty: number | null;
+  away_difficulty: number | null;
+  live: { fetched_at: string | null; minutes: number | null } | null;
+  summary: {
+    home: MatchSide;
+    away: MatchSide;
+    bonus: { name: string; team: string | null; bonus: number; bps: number }[];
+    top_scorer: { name: string; team: string | null; points: number } | null;
+  } | null;
+  /** Goal minutes and penalties (API-Football), by the side each counts for; null until fetched. */
+  goals?: { home: MatchGoal[]; away: MatchGoal[] } | null;
+  form: { home: TeamMatch[]; away: TeamMatch[] };
+  meetings: {
+    fixture_id: string;
+    season: string | null;
+    gameweek: number | null;
+    kickoff_time: string | null;
+    home_team: string;
+    away_team: string;
+    home_score: number;
+    away_score: number;
+  }[];
+  predicted: { home: { name: string; position: PositionCode | null; predicted_points: number }[]; away: { name: string; position: PositionCode | null; predicted_points: number }[] };
+}
+
+export interface GuardianArticle {
+  id: string;
+  title: string;
+  url: string;
+  summary: string | null;
+  byline: string | null;
+  thumbnail: string | null;
+  published: string | null;
+  source: string;
+}
+
+export interface FplNewsUpdate {
+  kind: 'injury' | 'doubt' | 'suspension' | 'unavailable' | 'return';
+  name: string;
+  web_name: string | null;
+  team: string | null;
+  position: string | null;
+  status: string;
+  chance: number | null;
+  text: string;
+  time: string | null;
+  photo: string | null;
+}
+
+export interface FplPriceChange {
+  name: string;
+  web_name: string | null;
+  team: string | null;
+  position: string | null;
+  /** £m, signed. */
+  change: number;
+  price: number | null;
+  selected: string | number | null;
+  photo: string | null;
+}
+
+export interface NewsResponse {
+  team: string | null;
+  guardian: { enabled: boolean; articles: GuardianArticle[]; stale: boolean; fetched_at: string | null };
+  fpl: { updates: FplNewsUpdate[]; prices: FplPriceChange[] };
 }
 
 export interface LeagueTableResponse {
@@ -1346,6 +1555,26 @@ export const apiService = {
 
   async getFixtures(gameweek?: number): Promise<FixturesResponse> {
     const { data } = await api.get<FixturesResponse>('/api/fixtures', { params: gameweek ? { gameweek } : undefined });
+    return data;
+  },
+
+  async getTeams(season?: string): Promise<TeamsIndexResponse> {
+    const { data } = await api.get<TeamsIndexResponse>('/api/teams', { params: { season } });
+    return data;
+  },
+
+  async getTeam(slug: string, season?: string): Promise<TeamPageResponse> {
+    const { data } = await api.get<TeamPageResponse>(`/api/teams/${encodeURIComponent(slug)}`, { params: { season } });
+    return data;
+  },
+
+  async getMatch(fixtureId: string): Promise<MatchPageResponse> {
+    const { data } = await api.get<MatchPageResponse>(`/api/matches/${encodeURIComponent(fixtureId)}`);
+    return data;
+  },
+
+  async getNews(team?: string): Promise<NewsResponse> {
+    const { data } = await api.get<NewsResponse>('/api/news', { params: { team } });
     return data;
   },
 

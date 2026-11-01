@@ -65,11 +65,18 @@ export function Tabs<T extends string>({ items, value, onChange, label, idPrefix
             onClick={() => onChange(tab.value)}
             className={cn(
               'relative whitespace-nowrap px-3 py-2.5 text-sm font-semibold transition-colors',
-              'border-b-[3px]',
-              selected ? 'border-accent text-fg' : 'border-transparent text-fg-subtle hover:text-fg',
+              'border-b-[3px] border-transparent',
+              selected ? 'text-fg' : 'text-fg-subtle hover:text-fg',
             )}
           >
             {tab.label}
+            {selected && (
+              <span
+                aria-hidden="true"
+                className="absolute inset-x-0 -bottom-[3px] h-[3px] rounded-t-sm"
+                style={{ backgroundImage: 'var(--grad-accent)' }}
+              />
+            )}
           </button>
         );
       })}

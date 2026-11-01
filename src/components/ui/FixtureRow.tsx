@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { ClubCrest } from './Identity';
 import { getClubAbbreviation } from '../../utils/clubLogos';
@@ -29,6 +30,8 @@ interface FixtureRowProps {
   status?: FixtureStatus;
   /** Include the weekday with the kickoff time (for lists not grouped by day). */
   showDay?: boolean;
+  /** Makes the row a link, e.g. to the match page. */
+  to?: string;
   className?: string;
 }
 
@@ -41,17 +44,17 @@ function formatKickoff(kickoff: string | Date | null | undefined, showDay: boole
 }
 
 /** Home crest/name · score or kickoff · away crest/name, centred on the score like FPL's fixtures list. */
-export function FixtureRow({ home, away, homeScore, awayScore, kickoff, status = 'scheduled', showDay = false, className }: FixtureRowProps) {
+export function FixtureRow({ home, away, homeScore, awayScore, kickoff, status = 'scheduled', showDay = false, to, className }: FixtureRowProps) {
   const hasScore = homeScore != null && awayScore != null && (status === 'finished' || status === 'live');
   const statusLabel = status === 'finished' ? 'FT' : status === 'live' ? 'Live' : status === 'postponed' ? 'Postponed' : null;
 
-  return (
-    <div
-      className={cn(
-        'grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-line px-2 py-3 last:border-0 sm:gap-4 sm:px-4',
-        className,
-      )}
-    >
+  const rowClass = cn(
+    'grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-line px-2 py-3 last:border-0 sm:gap-4 sm:px-4',
+    to && 'transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+    className,
+  );
+  const content = (
+    <>
       <div className="flex min-w-0 items-center justify-end gap-2 text-right">
         <TeamName team={home} />
         <ClubCrest team={home} size={24} />
@@ -91,6 +94,13 @@ export function FixtureRow({ home, away, homeScore, awayScore, kickoff, status =
         <ClubCrest team={away} size={24} />
         <TeamName team={away} />
       </div>
-    </div>
+    </>
+  );
+  return to ? (
+    <Link to={to} className={rowClass}>
+      {content}
+    </Link>
+  ) : (
+    <div className={rowClass}>{content}</div>
   );
 }

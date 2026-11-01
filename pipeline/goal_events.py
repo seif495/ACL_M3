@@ -24,7 +24,7 @@ from services import goal_events as ge
 
 logger = logging.getLogger(__name__)
 
-MAX_CALLS = 40          # a week of matches per call: a whole season's backfill fits in one run
+MAX_CALLS = 15          # a month of matches per call: a whole season's backfill fits in one run
 
 
 def _fixtures(season: str):
@@ -53,9 +53,12 @@ def run(live_dir: str = LIVE_DATA_DIR, season: str = CURRENT_SEASON, max_calls: 
 def check(days: int = 10) -> Dict[str, Any]:
     """The last `days` days of Premier League matches on ESPN's scoreboard, how each one's goals
     parse, and one match's raw details, to see the feed's format."""
-    end = datetime.now(timezone.utc).date()
-    data = ge.http_get({"dates": f"{end - timedelta(days=days):%Y%m%d}-{end:%Y%m%d}", "limit": 200})
-    matches = ge.espn_matches(data)
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+    matches = []
+    for month in ge.months([start.date(), end.date()]):
+        matches += [m for m in ge.espn_matches(ge.http_get({"dates": month}))
+                    if m["date"] and start <= ge.ss.to_datetime(m["date"]) <= end]
     done = [m for m in matches if m["completed"]]
     out: Dict[str, Any] = {"matches": len(matches), "finished": len(done), "parsed": []}
     for m in done:

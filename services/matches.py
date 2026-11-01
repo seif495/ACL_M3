@@ -211,6 +211,13 @@ def _match_player(api_name: Optional[str], players: List[Dict[str, Any]]) -> Opt
     from utils.text import normalize_name
     want = _surname(api_name)
     words = set(normalize_name(api_name).replace(".", " ").split())
+    # "Lewis Miley" (two Mileys), "João Pedro" (João Pedro Junqueira de Jesus): every word first
+    hits = [p["name"] for p in players if normalize_name(p["name"]) == normalize_name(api_name)]
+    if len(hits) == 1:
+        return hits[0]
+    hits = [p["name"] for p in players if len(words) > 1 and words <= set(normalize_name(p["name"]).split())]
+    if len(hits) == 1:
+        return hits[0]
     hits = [p["name"] for p in players if _surname(p["name"]) == want]
     if len(hits) == 1:
         return hits[0]

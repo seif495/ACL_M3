@@ -3,14 +3,13 @@ Goal minutes and penalties for match pages, from ESPN's public scoreboard feed (
 records who scored but not when or how, so this adds each goal's minute, whether it was a penalty
 or an own goal, and missed penalties when ESPN lists them.
 
-  site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard?dates=YYYYMMDD-YYYYMMDD
+  site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard?dates=YYYYMM
 
-One call returns every Premier League match in the date range, each with `details`: scoring plays
-and cards with a clock ("64'", "90'+4'"), the club, the players and penaltyKick/ownGoal flags.
-The feed is unofficial and undocumented, so the parser is defensive: a match is kept only when
-its goals add up to the final score. ESPN's `team` on an own goal may name either club, so both
-readings are tried and the one that matches the score wins; if neither does, nothing is saved and
-the match page falls back to FPL's scorers.
+One call returns a month's Premier League matches (20-40; a year stops at 100, and day ranges
+answer 400), each with `details`: scoring plays and cards with a clock ("64'", "45'+1'"), the
+club the goal counts for, the players with their own club, and penaltyKick/ownGoal flags. The
+feed is unofficial and undocumented, so the parser is defensive: a match is kept only when its
+goals add up to the final score, or nothing is saved and the page falls back to FPL's scorers.
 
 pipeline/goal_events.py runs this from the daily job for finished matches without events yet and
 saves $LIVE_DATA_DIR/goal_events/<season>.json; match pages only read that file
@@ -31,7 +30,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from services import season_service as ss
 
 API_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard"
-WINDOW_DAYS = 7         # days per scoreboard call
 PAUSE = 1.0             # seconds between calls
 TIMEOUT = 15.0
 STORE_DIR = "goal_events"
@@ -64,11 +62,12 @@ def _norm(name: str) -> str:
 
 
 def graph_team(name: str, teams: Iterable[str]) -> Optional[str]:
-    """ESPN's club name as the graph names it (aliases, then an exact or contained match)."""
+    """ESPN's club name as the graph names it: an alias when the season has that club (FPL renames
+    some, e.g. "Ipswich" became "Ipswich Town"), then an exact or contained match."""
     n = _norm(name)
-    if n in TEAM_ALIASES:
-        return TEAM_ALIASES[n]
     teams = list(teams)
+    if TEAM_ALIASES.get(n) in teams:
+        return TEAM_ALIASES[n]
     for t in teams:
         if _norm(t) == n:
             return t
@@ -155,8 +154,9 @@ def _kind(d: Dict[str, Any]) -> Optional[str]:
 
 def goal_rows(match: Dict[str, Any], home_team: str, away_team: str) -> Optional[List[Dict[str, Any]]]:
     """Goals, own goals and missed penalties of one ESPN match, in time order, with `team` the
-    graph name of the player's own club (for an own goal, the side that conceded it). None when
-    the goals don't add up to the final score under either reading of an own goal's club."""
+    graph name of the player's own club (for an own goal, the side that conceded it). ESPN files
+    an own goal under the club it counts for and gives the player's own club on the athlete;
+    without that, both readings are tried. None when the goals don't add up to the final score."""
     side_of = {match["home_id"]: "home", match["away_id"]: "away"}
     names = {"home": home_team, "away": away_team}
     other = {"home": "away", "away": "home"}
@@ -169,14 +169,20 @@ def goal_rows(match: Dict[str, Any], home_team: str, away_team: str) -> Optional
         minute, extra = parse_clock(d.get("clock"))
         athletes = d.get("athletesInvolved") or []
         player = (athletes[0].get("displayName") or athletes[0].get("shortName")) if athletes else None
-        events.append((kind, side, minute, extra, player))
+        club = side_of.get(str((athletes[0].get("team") or {}).get("id"))) if athletes else None
+        events.append((kind, side, minute, extra, player, club))
     want = (match.get("home_score"), match.get("away_score"))
     if None in want:
         return None
-    for og_listed_under_scorer in (True, False):
+    for og_listed_under_scorer in (False, True):
         rows, score = [], {"home": 0, "away": 0}
-        for kind, side, minute, extra, player in events:
-            own = side if og_listed_under_scorer or kind != "own_goal" else other[side]
+        for kind, side, minute, extra, player, club in events:
+            if kind != "own_goal":
+                own = side
+            elif club is not None:
+                own = club
+            else:
+                own = side if og_listed_under_scorer else other[side]
             if kind != "missed_penalty":
                 score[other[own] if kind == "own_goal" else own] += 1
             rows.append({"minute": minute, "extra": extra, "kind": kind, "player": player, "assist": None,
@@ -223,19 +229,9 @@ def events_for(fixture_id: str, season: str) -> Optional[List[Dict[str, Any]]]:
     return store.get("fixtures", {}).get(str(fixture_id))
 
 
-def windows(days: Iterable[date], span: int = WINDOW_DAYS) -> List[Tuple[date, date]]:
-    """Date ranges of at most `span` days covering every day in `days`, one day of margin each
-    side (ESPN dates matches in US Eastern time)."""
-    out: List[Tuple[date, date]] = []
-    for d in sorted(set(days)):
-        start, end = d - timedelta(days=1), d + timedelta(days=1)
-        if out and start <= out[-1][1] and (end - out[-1][0]).days < span:
-            out[-1] = (out[-1][0], max(out[-1][1], end))
-        elif out and start <= out[-1][1]:
-            out.append((out[-1][1] + timedelta(days=1), end))
-        else:
-            out.append((start, end))
-    return out
+def months(days: Iterable[date]) -> List[str]:
+    """The scoreboard's months ("YYYYMM") holding these days."""
+    return sorted({f"{d:%Y%m}" for d in days})
 
 
 UNMATCHED_RETRY = timedelta(days=3)     # a match whose goals didn't add up is tried again for 3 days
@@ -243,7 +239,7 @@ UNMATCHED_RETRY = timedelta(days=3)     # a match whose goals didn't add up is t
 
 def update(ours: List[Dict[str, Any]], season: str, live_dir: str, *, fetch: Fetch = http_get,
            max_calls: int = 40, pause: float = PAUSE) -> Dict[str, Any]:
-    """Fetch goal events for `ours`' finished matches that have none saved, a week of
+    """Fetch goal events for `ours`' finished matches that have none saved, a month of
     scoreboard per call, within max_calls."""
     store = load_store(live_dir, season)
     now = datetime.now(timezone.utc)
@@ -256,12 +252,12 @@ def update(ours: List[Dict[str, Any]], season: str, live_dir: str, *, fetch: Fet
     if not todo:
         return out
     by_id = {str(f["id"]): f for f in todo}
-    for i, (start, end) in enumerate(windows(ss.to_datetime(f["kickoff_time"]).date() for f in todo)):
+    for i, month in enumerate(months(ss.to_datetime(f["kickoff_time"]).date() for f in todo)):
         if out["calls"] >= max_calls:
             break
         if i and pause:
             time.sleep(pause)
-        data = fetch({"dates": f"{start:%Y%m%d}-{end:%Y%m%d}", "limit": 200})
+        data = fetch({"dates": month})
         out["calls"] += 1
         for fid, m in pair_fixtures([m for m in espn_matches(data) if m["completed"]], list(by_id.values())).items():
             f = by_id.pop(fid)
@@ -274,8 +270,8 @@ def update(ours: List[Dict[str, Any]], season: str, live_dir: str, *, fetch: Fet
             store["fixtures"][fid] = rows
             store["unmatched"].pop(fid, None)
             out["fetched"] += 1
-        for fid, f in list(by_id.items()):      # in this window, but ESPN had no such finished match
-            if start <= ss.to_datetime(f["kickoff_time"]).date() <= end:
+        for fid, f in list(by_id.items()):      # in this month, but ESPN had no such finished match
+            if f"{ss.to_datetime(f['kickoff_time']):%Y%m}" == month:
                 store["unmatched"][fid] = {"reason": "not on ESPN's scoreboard"}
                 by_id.pop(fid)
                 out["unpaired"] += 1

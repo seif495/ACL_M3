@@ -20,9 +20,10 @@ OURS = [
 ]
 
 
-def detail(text, clock, team_id, player, *, scoring=True, pen=False, og=False):
+def detail(text, clock, team_id, player, *, scoring=True, pen=False, og=False, club=None):
+    athlete = {"displayName": player, **({"team": {"id": club}} if club else {})}
     return {"type": {"text": text}, "clock": {"displayValue": clock}, "team": {"id": team_id},
-            "scoringPlay": scoring, "penaltyKick": pen, "ownGoal": og, "athletesInvolved": [{"displayName": player}]}
+            "scoringPlay": scoring, "penaltyKick": pen, "ownGoal": og, "athletesInvolved": [athlete]}
 
 
 def event(eid, home, hid, away, aid, score, details, completed=True, when=None):
@@ -52,8 +53,10 @@ def chelsea(details=CHELSEA_DETAILS, score=(3, 0)):
 
 
 def test_team_names_and_pairing():
-    teams = ["Chelsea", "Man Utd", "Spurs", "Nott'm Forest", "Coventry City", "Wolves"]
+    teams = ["Chelsea", "Man Utd", "Spurs", "Nott'm Forest", "Coventry City", "Wolves", "Ipswich Town"]
     assert ge.graph_team("Manchester United", teams) == "Man Utd" and ge.graph_team("Coventry City", teams) == "Coventry City"
+    # an alias only counts when the season has that club: FPL renamed Ipswich to Ipswich Town
+    assert ge.graph_team("Ipswich Town", teams) == "Ipswich Town" and ge.graph_team("Ipswich Town", ["Ipswich"]) == "Ipswich"
     assert ge.graph_team("Wolverhampton Wanderers", teams) == "Wolves" and ge.graph_team("Chelsea FC", teams) == "Chelsea"
     assert ge.graph_team("Real Madrid", teams) is None
     spurs = event("740002", "Tottenham Hotspur", "367", "Nottingham Forest", "393", (0, 0), [])
@@ -77,9 +80,21 @@ def test_goal_rows_kinds_order_and_own_goal_club():
 
 
 def test_own_goal_listed_under_the_club_it_counts_for():
+    # without the athlete's club: the reading that adds up to the score wins
     details = [detail("Goal", "50'", "363", "Morgan Rogers"), detail("Own Goal", "70'", "363", "Harry Maguire", og=True)]
     rows = ge.goal_rows(ge.espn_matches(board(chelsea(details, (2, 0))))[0], "Chelsea", "Man Utd")
     assert [(r["kind"], r["team"]) for r in rows] == [("goal", "Chelsea"), ("own_goal", "Man Utd")]
+
+
+def test_own_goal_as_espn_sends_it():
+    # Liverpool 2-0 Brighton, 2026-10-25: filed under Liverpool (364), Gross's own club on the athlete (331)
+    details = [detail("Own Goal", "17'", "364", "Pascal Gross", og=True, club="331"),
+               detail("Goal - Volley", "21'", "364", "Alexander Isak", club="364"),
+               detail("Yellow Card", "45'+3'", "331", "Olivier Boscagli", scoring=False, club="331")]
+    m = ge.espn_matches(board(event("401878765", "Liverpool", "364", "Brighton & Hove Albion", "331", (2, 0), details)))[0]
+    rows = ge.goal_rows(m, "Liverpool", "Brighton")
+    assert [(r["player"], r["minute"], r["kind"], r["team"]) for r in rows] == [
+        ("Pascal Gross", 17, "own_goal", "Brighton"), ("Alexander Isak", 21, "goal", "Liverpool")]
 
 
 def test_goals_that_dont_add_up_are_not_kept():
@@ -94,12 +109,8 @@ def test_shootout_and_unfinished_are_ignored():
     assert not ge.espn_matches(board(live))[0]["completed"]
 
 
-def test_windows_cover_every_day_a_week_at_most():
-    days = [date(2026, 10, d) for d in (3, 4, 5, 17, 18, 21, 22, 28)]
-    ws = ge.windows(days)
-    assert all((e - s).days < ge.WINDOW_DAYS for s, e in ws)
-    assert all(any(s <= d <= e for s, e in ws) for d in days)
-    assert len(ws) <= 4
+def test_one_call_per_month():
+    assert ge.months([date(2026, 10, 31), date(2026, 8, 22), date(2026, 10, 3)]) == ["202608", "202610"]
 
 
 def test_update_fetches_saves_and_stops(tmp_path):
@@ -112,7 +123,7 @@ def test_update_fetches_saves_and_stops(tmp_path):
 
     out = ge.update(OURS, SEASON, str(tmp_path), fetch=fetch, pause=0)
     assert out == {"season": SEASON, "fetched": 2, "calls": 1, "unpaired": 0, "unmatched": 0, "left": 0}
-    assert calls[0]["limit"] == 200 and "-" in calls[0]["dates"]
+    assert calls == [{"dates": f"{K:%Y%m}"}]
     store = ge.load_store(str(tmp_path), SEASON)
     assert len(store["fixtures"][f"90-{SEASON}"]) == 4 and store["fixtures"][f"91-{SEASON}"] == []
     assert store["source"] == "espn"
@@ -130,7 +141,7 @@ def test_mismatched_or_missing_matches_are_retried_for_three_days_only(tmp_path)
 
 
 def test_budget_stops(tmp_path):
-    many = [{**OURS[0], "id": f"{i}-{SEASON}", "kickoff_time": K - timedelta(days=10 * i)} for i in range(6)]
+    many = [{**OURS[0], "id": f"{i}-{SEASON}", "kickoff_time": K - timedelta(days=31 * i)} for i in range(6)]
     calls = []
     out = ge.update(many, SEASON, str(tmp_path), fetch=lambda p: calls.append(p) or board(), max_calls=2, pause=0)
     assert len(calls) == 2 and out["calls"] == 2 and out["left"] == 4
@@ -155,3 +166,13 @@ def test_timeline_credits_own_goals_and_matches_names():
     assert [(g["minute"], g["kind"], g["player"]) for g in t["home"]] == [
         (50, "goal", "Morgan Rogers"), (64, "penalty", "Cole Palmer"), (90, "own_goal", "Harry Maguire")]
     assert [(g["kind"], g["player"]) for g in t["away"]] == [("missed_penalty", "Bruno Borges Fernandes")]
+
+
+def test_names_with_every_word_beat_a_shared_surname():
+    players = [{"name": n} for n in ("Lewis Miley", "Mason Miley", "João Pedro Junqueira de Jesus", "Pedro Lomba Neto",
+                                     "Bruno Borges Fernandes", "Oli McBurnie")]
+    assert mt._match_player("Lewis Miley", players) == "Lewis Miley"
+    assert mt._match_player("João Pedro", players) == "João Pedro Junqueira de Jesus"
+    assert mt._match_player("Pedro Neto", players) == "Pedro Lomba Neto"
+    assert mt._match_player("Bruno Fernandes", players) == "Bruno Borges Fernandes"
+    assert mt._match_player("Oliver McBurnie", players) == "Oli McBurnie"

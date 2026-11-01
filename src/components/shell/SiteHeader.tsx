@@ -13,6 +13,7 @@ export const PRIMARY_NAV: NavItem[] = [
   { to: '/', label: 'Home' },
   { to: '/fixtures', label: 'Fixtures' },
   { to: '/table', label: 'Table' },
+  { to: '/teams', label: 'Clubs' },
   { to: '/team-of-the-week', label: 'Team of the Week' },
   { to: '/players', label: 'Players' },
   { to: '/predictions', label: 'Predictions' },

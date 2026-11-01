@@ -37,7 +37,7 @@
 		# Client-side routes get index.html with 200. Keep this list in sync with the routes in
 		# src/App.tsx (and SITEMAP_ROUTES in vite.config.ts). A route missing here still renders
 		# in the browser, just with a 404 status, which tells search engines it doesn't exist.
-		@route path / /fixtures /table /team-of-the-week /players /predictions /model /assistant /compare /trivia /settings /privacy /terms /contact /stats /design /qa /search
+		@route path / /fixtures /table /teams /teams/* /matches/* /team-of-the-week /players /predictions /model /assistant /compare /trivia /settings /privacy /terms /contact /stats /design /qa /search
 		rewrite @route /index.html
 
 		# Real files: assets, crests, icons, robots.txt, sitemap.xml, ...

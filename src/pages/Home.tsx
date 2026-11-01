@@ -22,6 +22,8 @@ import {
 } from '../components/ui';
 import { getClubAbbreviation } from '../utils/clubLogos';
 import { usePageMeta } from '../hooks/usePageMeta';
+import { matchPath, teamPath } from '../utils/clubColors';
+import { NewsSection } from '../components/news/NewsSection';
 import { usePlayerDialog } from '../hooks/usePlayerDialog';
 import type { PlayerHint } from '../components/players/PlayerProfileView';
 import { cn } from '../utils/cn';
@@ -236,6 +238,7 @@ function NextFixtures() {
               awayScore={f.away_score}
               kickoff={f.kickoff_time}
               status={STATUS[f.status]}
+              to={matchPath(f.id)}
               showDay
             />
           ))}
@@ -274,8 +277,10 @@ function MiniTable() {
                 <td className="px-4 py-2">
                   <span className="flex items-center gap-2">
                     <span className="w-5 text-right tabular-nums text-fg-subtle">{r.position}</span>
-                    <ClubCrest team={r.team} size={18} />
-                    <span className="truncate font-semibold text-fg">{r.team}</span>
+                    <Link to={teamPath(r.team)} className="flex min-w-0 items-center gap-2 hover:text-accent">
+                      <ClubCrest team={r.team} size={18} />
+                      <span className="truncate font-semibold text-fg hover:text-accent">{r.team}</span>
+                    </Link>
                   </span>
                 </td>
                 <td className="px-2 py-2 text-right tabular-nums text-fg-muted">{r.played}</td>
@@ -398,6 +403,10 @@ export function Home() {
           <MiniTable />
           <TeamNews />
         </div>
+      </Container>
+      <Container className="pb-8">
+        {/* Team news is already in the column above; here, headlines and price changes */}
+        <NewsSection title="Latest news" showUpdates={false} articles={7} />
       </Container>
     </>
   );

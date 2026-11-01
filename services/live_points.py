@@ -50,6 +50,9 @@ def parse_live(live: Dict[str, Any], fixtures: Iterable[Dict[str, Any]]) -> Dict
     started = {int(f["id"]) for f in fixtures if f.get("started") or f.get("finished") or f.get("finished_provisional")}
     finished = {int(f["id"]) for f in fixtures if f.get("finished") or f.get("finished_provisional")}
     actual: Dict[int, Dict[str, int]] = {}
+    # Per fixture, each player's stat values and points in it (match pages; a double gameweek
+    # splits by fixture). explain lists {identifier, value, points} per scoring stat.
+    by_fixture: Dict[int, Dict[int, Dict[str, Any]]] = {}
     for el in live.get("elements") or []:
         stats = el.get("stats") or {}
         played_fixtures = {int(x["fixture"]) for x in el.get("explain") or [] if x.get("fixture") is not None}
@@ -57,7 +60,23 @@ def parse_live(live: Dict[str, Any], fixtures: Iterable[Dict[str, Any]]) -> Dict
             continue
         actual[int(el["id"])] = {"points": int(stats.get("total_points") or 0),
                                  "minutes": int(stats.get("minutes") or 0)}
+        for x in el.get("explain") or []:
+            if x.get("fixture") is None or int(x["fixture"]) not in started:
+                continue
+            row: Dict[str, Any] = {"points": 0}
+            for st in x.get("stats") or []:
+                row[st.get("identifier")] = st.get("value")
+                row["points"] += int(st.get("points") or 0) + int(st.get("points_modification") or 0)
+            if len(played_fixtures) == 1:
+                # one match: the element's totals include stats explain leaves out (xG, BPS, starts)
+                row = {**{k: v for k, v in stats.items() if k != "total_points"}, **row,
+                       "points": int(stats.get("total_points") or row["points"])}
+            by_fixture.setdefault(int(x["fixture"]), {})[int(el["id"])] = row
+    scores = {int(f["id"]): {"home_score": f.get("team_h_score"), "away_score": f.get("team_a_score"),
+                             "started": int(f["id"]) in started, "finished": int(f["id"]) in finished,
+                             "minutes": f.get("minutes")} for f in fixtures}
     return {"actual": actual, "started": sorted(started), "finished": sorted(finished),
+            "by_fixture": by_fixture, "fixtures": scores,
             "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 

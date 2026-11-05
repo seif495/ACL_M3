@@ -48,7 +48,7 @@ function Leaders({ title, unit, items, team }: { title: string; unit: string; it
   const max = Math.max(1, ...items.map((i) => i.value));
   return (
     <Card padded={false}>
-      <h3 className="border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">{title}</h3>
+      <h2 className="border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">{title}</h2>
       {items.length === 0 ? (
         <p className="px-4 py-6 text-data text-fg-subtle">None yet.</p>
       ) : (
@@ -89,12 +89,12 @@ function SquadTable({ squad, team, current }: { squad: TeamSquadPlayer[]; team: 
     <div className="grid gap-4 lg:grid-cols-2">
       {groups.filter((g) => g.players.length).map((g) => (
         <Card key={g.pos} padded={false}>
-          <h3 className="flex items-center justify-between border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">
+          <h2 className="flex items-center justify-between border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">
             {POSITION_TITLES[g.pos]}
             <span className="text-micro font-semibold uppercase text-fg-subtle">
               Pts{current ? ' · xPts' : ''}
             </span>
-          </h3>
+          </h2>
           <ul>
             {g.players.map((p) => (
               <li key={p.name} className="border-b border-line last:border-0">
@@ -272,11 +272,11 @@ export function TeamPage() {
               </div>
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
                 <Card className="min-w-0">
-                  <SectionHeading as="h3" size="md" title="League position" subtitle="After each gameweek" />
+                  <SectionHeading as="h2" size="md" title="League position" subtitle="After each gameweek" />
                   <PositionChart history={t.position_history} teams={t.teams_in_table} color={colors.primary === '230 230 230' ? '0 230 140' : colors.primary} />
                 </Card>
                 <Card padded={false}>
-                  <h3 className="border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">Recent results</h3>
+                  <h2 className="border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">Recent results</h2>
                   <MatchList matches={t.results.slice(0, 5)} empty="No results yet." />
                 </Card>
               </div>
@@ -284,7 +284,7 @@ export function TeamPage() {
                 <Leaders title="Top scorers" unit="goals" items={t.top_scorers} team={t.team} />
                 <Leaders title="Most assists" unit="assists" items={t.top_assists} team={t.team} />
                 <Card padded={false}>
-                  <h3 className="border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">Coming up</h3>
+                  <h2 className="border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">Coming up</h2>
                   <MatchList matches={t.fixtures.slice(0, 5)} empty="No fixtures left this season." />
                 </Card>
               </div>
@@ -298,11 +298,11 @@ export function TeamPage() {
           ) : tab === 'matches' ? (
             <div className="grid gap-4 lg:grid-cols-2">
               <Card padded={false}>
-                <h3 className="border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">Results</h3>
+                <h2 className="border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">Results</h2>
                 <MatchList matches={t.results} empty="No results yet." />
               </Card>
               <Card padded={false}>
-                <h3 className="border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">Fixtures</h3>
+                <h2 className="border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">Fixtures</h2>
                 <MatchList matches={t.fixtures} empty="No fixtures left this season." />
               </Card>
             </div>

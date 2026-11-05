@@ -8,7 +8,7 @@ import { ClubCrest, FdrBadge } from '../ui';
 const RESULT_STYLE = {
   W: 'bg-accent text-accent-on',
   D: 'bg-fg-subtle text-accent-on',
-  L: 'bg-danger text-white',
+  L: 'bg-danger text-accent-on',
 } as const;
 const RESULT_WORD = { W: 'Win', D: 'Draw', L: 'Loss' } as const;
 

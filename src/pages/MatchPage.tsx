@@ -78,6 +78,12 @@ function PlayerLine({ p, team }: { p: MatchPlayer; team: string }) {
     ...(p.yellow_cards ? ['🟨'] : []),
     ...(p.red_cards ? ['🟥'] : []),
   ];
+  const tagWords = [
+    p.goals ? `${p.goals} ${p.goals > 1 ? 'goals' : 'goal'}` : '',
+    p.assists ? `${p.assists} ${p.assists > 1 ? 'assists' : 'assist'}` : '',
+    p.yellow_cards ? 'yellow card' : '',
+    p.red_cards ? 'red card' : '',
+  ].filter(Boolean);
   return (
     <li className="border-b border-line last:border-0">
       <button
@@ -91,6 +97,7 @@ function PlayerLine({ p, team }: { p: MatchPlayer; team: string }) {
           <span className="flex items-center gap-1.5">
             <span className="truncate text-sm font-semibold text-fg">{p.name}</span>
             {tags.length > 0 && <span aria-hidden="true" className="shrink-0 text-micro">{tags.join('')}</span>}
+            {tagWords.length > 0 && <span className="sr-only">, {tagWords.join(', ')}</span>}
           </span>
           <span className="flex items-center gap-1.5 text-micro text-fg-subtle">
             <PositionBadge position={p.position ?? undefined} className="w-8" />
@@ -192,7 +199,7 @@ function Preview({ m }: { m: MatchPageResponse }) {
       <section className="grid gap-4 md:grid-cols-2">
         {sides.map(({ key, team }) => (
           <Card key={key}>
-            <SectionHeading as="h3" size="md" title={`${team} form`} subtitle="Last five league matches before this one" />
+            <SectionHeading as="h2" size="md" title={`${team} form`} subtitle="Last five league matches before this one" />
             <FormChips
               items={m.form[key].map((f) => ({ fixture_id: f.fixture_id, result: f.result!, opponent: f.opponent, home: f.home, score: f.score }))}
             />
@@ -252,6 +259,9 @@ export function MatchPage() {
         <Container className="relative py-8 sm:py-12">
           {m ? (
             <>
+              <h1 className="sr-only">
+                {m.home_team} v {m.away_team}
+              </h1>
               <p className="text-center text-micro font-semibold uppercase tracking-wide text-fg-muted">
                 {m.season} · Gameweek {m.gameweek ?? '–'}
                 {kickoff && ` · ${kickoff.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}`}
@@ -285,7 +295,7 @@ export function MatchPage() {
                   )}
                   <span className="mt-2 text-micro font-semibold uppercase">
                     {live ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-danger px-2 py-0.5 text-white">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-danger px-2 py-0.5 text-accent-on">
                         <Radio className="h-3 w-3" aria-hidden="true" /> Live{m.live?.minutes ? ` · ${m.live.minutes}′` : ''}
                       </span>
                     ) : played ? (

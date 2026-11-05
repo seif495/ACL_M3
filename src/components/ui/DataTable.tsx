@@ -121,7 +121,7 @@ export function DataTable<T>({
   const stickyCell = 'sticky left-0 z-[1]';
 
   return (
-    <div className={cn('overflow-x-auto rounded-lg border border-line bg-surface', className)}>
+    <div className={cn('relative overflow-x-auto rounded-lg border border-line bg-surface', className)}>
       <table className="w-full border-collapse text-data">
         <caption className={cn(showCaption ? 'px-3 py-2 text-left text-data text-fg-subtle' : 'sr-only')}>{caption}</caption>
         <thead>
@@ -150,7 +150,7 @@ export function DataTable<T>({
                       type="button"
                       onClick={() => toggleSort(col)}
                       className={cn(
-                        'inline-flex items-center gap-1 uppercase hover:text-fg',
+                        '-my-1.5 inline-flex items-center gap-1 py-1.5 uppercase hover:text-fg',
                         align === 'right' && 'flex-row-reverse',
                         active && 'text-accent',
                       )}

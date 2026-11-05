@@ -105,8 +105,8 @@ interface PitchPlayerProps {
 
 const PLATE: Record<string, string> = {
   d: 'bg-warning text-accent-on',
-  i: 'bg-danger text-white',
-  s: 'bg-danger text-white',
+  i: 'bg-danger text-accent-on',
+  s: 'bg-danger text-accent-on',
   u: 'bg-fg-subtle text-accent-on',
 };
 const STATUS_TEXT: Record<string, string> = { d: 'doubtful', i: 'injured', s: 'suspended', u: 'unavailable' };

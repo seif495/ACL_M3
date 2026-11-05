@@ -159,7 +159,7 @@ function AnswerOption({
         aria-hidden="true"
         className={cn(
           "flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-micro font-bold",
-          state === "correct" ? "bg-accent text-accent-on" : state === "wrong" ? "bg-danger text-white" : "bg-surface-2 text-fg-muted",
+          state === "correct" ? "bg-accent text-accent-on" : state === "wrong" ? "bg-danger text-accent-on" : "bg-surface-2 text-fg-muted",
         )}
       >
         {letter}

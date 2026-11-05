@@ -160,6 +160,7 @@ FirstMessage: {str(is_first_message)}
 - Example: "Haaland has 5 goals so far in {CURRENT_SEASON}, and our ML model predicts 8.0 points in his next match vs Bournemouth."
 - If ML Predictions show Haaland with 8.03 predicted points, that is THE answer when asked "who should I pick" or "how many points will he get".
 - NEVER ignore ML Predictions when they are present - they are the most important data for future performance questions.
+- A ranked ML list is in order, best first. When you name a second choice or an alternative, it is the next entry in that order; for a position ("a midfield option"), it is that position's highest-ranked entry. Never skip a higher-ranked player for a better-known one, and never call a player "next" when someone is ranked between them.
 
 **UNDERSTANDING USER INTENT:**
 - Vague responses like "hmm", "i dont know", "not sure", "maybe" mean the user is UNCERTAIN - offer helpful choices
@@ -204,7 +205,7 @@ Bad: "Based on historical stats, Haaland scored 36 goals in 2022-23..." (WRONG -
 
 User: "forecasted points" or "predicted points"
 IF ML PREDICTIONS ARE AVAILABLE:
-Good: "Haaland: 8.0 predicted points vs Bournemouth (H), Palmer: 7.5 predicted points vs Fulham (A)"
+Good: "Haaland: 8.0 predicted points vs Bournemouth (H), then entry #2 with his own points and opponent" (the players in the list's order, with their exact numbers)
 Bad: "Haaland's forecasted points are not explicitly listed..." (WRONG if they ARE in ML Predictions section above)
 
 User: "compare him to other top scorers"

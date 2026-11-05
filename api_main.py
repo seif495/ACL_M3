@@ -745,6 +745,26 @@ def _availability_note(row, inline: bool = False) -> str:
     return f" [{detail}]" if inline else f"\n- Availability (official FPL news): {detail}"
 
 
+def _top_predictions_context(df, n: int = 5) -> str:
+    """The n highest predictions as a numbered list, best first, then the highest-ranked entry of each
+    position in it. Without the ranks spelt out, the LLM named a well-known player as the "next" or the
+    "midfield option" even when the list ranked another midfielder above him."""
+    top = df.nlargest(n, "predicted_points")
+    lines = [f"ML Predictions - Top {len(top)} performers for next gameweek, ranked best first:"]
+    best: dict[str, tuple[int, str, float]] = {}
+    for rank, (_, row) in enumerate(top.iterrows(), start=1):
+        home_away = "H" if row["is_home"] else "A"
+        lines.append(f"{rank}. {row['name']} ({row['position']}): {row['predicted_points']:.1f} pts "
+                     f"vs {row['opponent']} ({home_away}){_availability_note(row, inline=True)}")
+        best.setdefault(str(row["position"]), (rank, str(row["name"]), float(row["predicted_points"])))
+    if len(best) > 1:
+        order = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
+        picks = sorted(best.items(), key=lambda item: order.get(item[0], 4))
+        lines.append("Highest-ranked in this list by position: "
+                     + "; ".join(f"{pos} #{rank} {name} ({points:.1f} pts)" for pos, (rank, name, points) in picks))
+    return "\n".join(lines) + "\n"
+
+
 def get_player_index(conn=None) -> PlayerIndex:
     """Shared in-memory player index; built at startup and rebuilt after data loads."""
     index = app_state["player_index"]
@@ -1774,14 +1794,7 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
                                 if pos:
                                     df = df[df['position'] == pos.upper()]
                                 
-                                # Get top 5
-                                top_5 = df.nlargest(5, 'predicted_points')
-                                
-                                ml_context = "ML Predictions - Top 5 performers for next gameweek:\n"
-                                for idx, row in top_5.iterrows():
-                                    opponent = row['opponent']
-                                    home_away = "H" if row['is_home'] else "A"
-                                    ml_context += f"- {row['name']} ({row['position']}): {row['predicted_points']:.1f} pts vs {opponent} ({home_away}){_availability_note(row, inline=True)}\n"
+                                ml_context = _top_predictions_context(df, 5)
                             else:
                                 # Fallback to Neo4j
                                 pos = entities.positions[0] if entities.positions else None

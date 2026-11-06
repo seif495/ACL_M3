@@ -71,7 +71,8 @@ function Leaders({ title, unit, items, team }: { title: string; unit: string; it
                 </span>
                 <span className="font-display text-h3 font-bold tabular-nums text-fg">
                   {p.value}
-                  <span className="sr-only"> {unit}</span>
+                  {/* "1 goal", "3 goals" */}
+                  <span className="sr-only"> {p.value === 1 ? unit.replace(/s$/, '') : unit}</span>
                 </span>
               </button>
             </li>

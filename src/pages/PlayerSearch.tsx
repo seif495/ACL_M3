@@ -23,8 +23,7 @@ import {
 import { PlayerProfileView } from '../components/players/PlayerProfileView';
 import { PLAYER_SEASONS } from '../components/players/seasons';
 import { usePageMeta } from '../hooks/usePageMeta';
-
-const EXAMPLE_SEARCHES = ['Salah', 'Haaland', 'De Bruyne', 'Trent', 'Saka'];
+import { useExamplePlayers } from '../hooks/useExamplePlayers';
 
 
 const DEFAULT_LEADERS_FILTERS: LeadersFilters = {
@@ -65,6 +64,7 @@ function leaderToPlayer(leader: PlayerLeader): PlayerResult {
 export function PlayerSearch() {
   usePageMeta({ title: "Players", description: "Season leaders and stats for every FPL player since 2020-21: points, goals, assists, clean sheets and per-game rates." });
   const { neo4jConnected } = useAppStore();
+  const examples = useExamplePlayers(neo4jConnected).top;
   const location = useLocation();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
@@ -194,17 +194,18 @@ export function PlayerSearch() {
           </div>
         )}
 
-        {!hasSearched && neo4jConnected && !selectedPlayer && (
+        {!hasSearched && neo4jConnected && !selectedPlayer && examples.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-data text-fg-subtle">Try:</span>
-            {EXAMPLE_SEARCHES.map((name) => (
+            {examples.map((p) => (
               <button
-                key={name}
+                key={p.name}
                 type="button"
-                onClick={() => handleExample(name)}
+                onClick={() => handleExample(p.name)}
+                title={p.name}
                 className="rounded-full border border-line-strong px-3 py-1 text-data text-fg-muted transition-colors hover:border-accent hover:text-fg"
               >
-                {name}
+                {p.label}
               </button>
             ))}
           </div>

@@ -434,6 +434,8 @@ export interface HealthStatus {
 
 export interface MLPrediction {
   player_name: string;
+  /** FPL's short name ("Evanilson"), for display only; lookups use player_name. */
+  web_name?: string | null;
   predicted_points: number;
   confidence_interval?: [number, number];
   features_used?: Record<string, unknown>;
@@ -1225,6 +1227,8 @@ export type PlayerLeaderSort =
 
 export interface PlayerLeader {
   name: string;
+  /** FPL's short name, for display only (current players); lookups use name. */
+  web_name?: string | null;
   team: string | null;
   /** The player's position in that season. */
   position: PositionCode | null;

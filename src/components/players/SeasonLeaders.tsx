@@ -11,6 +11,7 @@ import {
 import { usePlayerAvatars } from '../../hooks/usePlayerAvatars';
 import { getClubAbbreviation } from '../../utils/clubLogos';
 import { cn } from '../../utils/cn';
+import { displayName } from '../../utils/playerNames';
 import {
   Button,
   Card,
@@ -323,7 +324,7 @@ function LeaderPlayerCell({
       <PlayerAvatar name={row.name} src={photo} size={32} />
       <span className="min-w-0">
         <span className="block truncate font-semibold text-fg group-hover:text-accent" title={row.name}>
-          {row.name}
+          {displayName(row.name, row.web_name)}
         </span>
         <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-micro text-fg-subtle">
           {row.team && <ClubCrest team={row.team} size={14} />}

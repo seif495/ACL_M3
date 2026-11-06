@@ -731,6 +731,9 @@ def get_player_leaders(conn, season: str = CURRENT_SEASON, position: Optional[st
     rows = _cached(("leaders", season, position, sort, int(limit), params["team"], params["max_price"]),
                    lambda: leader_rows(conn.execute_query(query, params),
                                        include_availability=season == CURRENT_SEASON))
+    # FPL's display name for players in this season's game (display only: `name` stays the key)
+    web_names = status_lookup()["web_name"]
+    rows = [{**r, "web_name": web_names.get(r["name"])} for r in rows]
     return {"season": season, "sort": sort, "position": position, "team": team or None,
             "max_price": max_price, "players": with_photos(rows, photo_for)}
 

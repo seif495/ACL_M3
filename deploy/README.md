@@ -4,7 +4,7 @@ Everything runs on one VM with Docker Compose:
 
 | Service | What it does |
 |---|---|
-| `web` | Caddy: automatic HTTPS, serves the built React app, proxies `/api`, `/health`, `/ws` to the backend |
+| `web` | Caddy: automatic HTTPS, serves the built React app, proxies `/api`, `/health`, `/ws` to the backend, and sends it social apps' link-preview requests and `/sitemap-data.xml` |
 | `backend` | FastAPI app (`api_main.py`) |
 | `neo4j` | Neo4j 5.26 Community, data in a Docker volume (not exposed publicly) |
 
@@ -165,6 +165,8 @@ You get an email if a run fails or doesn't happen, and also when a run finishes 
 Until then the workflow skips itself.
 
 **Using your own domain later:** point an `A` record at the VM's IP, set `SITE_ADDRESS=your.domain` in `deploy/.env`, and run `bash deploy/deploy.sh`.
+
+**Link previews and the sitemap:** social apps (WhatsApp, X, Facebook, Slack, Discord, LinkedIn, Telegram, ...) don't run JavaScript, so Caddy sends their crawlers' page requests to the backend (`/api/seo/preview`), which answers that page's own title, description and image; people and Googlebot get the app as before. `/sitemap.xml` is an index of the build's `/sitemap-pages.xml` and `/sitemap-data.xml`, the current season's club and match pages from the backend. The backend takes the absolute URLs from `SITE_ADDRESS` in `deploy/.env` (`SITE_URL` overrides it). To see what a crawler gets: `curl -A "facebookexternalhit/1.1" https://<SITE_ADDRESS>/teams/arsenal`, or a platform's own preview tool (Facebook's Sharing Debugger, LinkedIn's Post Inspector); apps cache previews, so an old link can keep its old card for a while.
 
 ## Retiring the old hosting
 

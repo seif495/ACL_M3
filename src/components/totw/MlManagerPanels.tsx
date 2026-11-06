@@ -6,6 +6,7 @@ import type {
   MlManagerTransfer,
 } from '../../services/api';
 import { cn } from '../../utils/cn';
+import { displayName } from '../../utils/playerNames';
 import { PlayerNameButton } from '../players/PlayerNameButton';
 import { Card, Chip, ClubCrest, PlayerAvatar, PositionBadge, SectionHeading } from '../ui';
 import {
@@ -43,7 +44,7 @@ function TransferSide({ direction, player, price }: { direction: 'out' | 'in'; p
       <PlayerAvatar name={player.name} src={player.photo} size={28} />
       <span className="min-w-0 flex-1">
         <span title={player.name} className="block truncate text-sm font-semibold text-fg">
-          {player.name}
+          {displayName(player.name, player.web_name)}
         </span>
         <span className="flex items-center gap-1.5 text-micro text-fg-subtle">
           <ClubCrest team={player.team} size={14} label="short" />
@@ -196,6 +197,7 @@ export function BenchCard({ gw, lineup }: { gw: MlManagerGameweek; lineup: Lineu
               <span className="min-w-0 flex-1">
                 <PlayerNameButton
                   player={{ name: p.name, team: p.team, position: p.position, photo: p.photo }}
+                  label={displayName(p.name, p.web_name)}
                   className="block text-sm font-semibold text-fg"
                 />
                 {replacement ? (

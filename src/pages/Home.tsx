@@ -27,6 +27,7 @@ import { NewsSection } from '../components/news/NewsSection';
 import { usePlayerDialog } from '../hooks/usePlayerDialog';
 import type { PlayerHint } from '../components/players/PlayerProfileView';
 import { cn } from '../utils/cn';
+import { displayName, shortName } from '../utils/playerNames';
 
 const STATUS: Record<SeasonFixture['status'], FixtureStatus> = {
   scheduled: 'scheduled',
@@ -127,10 +128,6 @@ function PlayerOpener({ player, className, children }: { player: PlayerHint; cla
   );
 }
 
-function lastName(name: string) {
-  return name.split(' ').slice(-1)[0] || name;
-}
-
 /** The model's top prediction for the gameweek, featured in the hero. */
 function CaptainPick() {
   const { data, isLoading } = useQuery(TOP_PICKS_QUERY);
@@ -150,14 +147,16 @@ function CaptainPick() {
       <PlayerAvatar name={top.player_name} src={avatars[top.player_name]} size={72} loading="eager" />
       <div className="min-w-0 flex-1">
         <p className="text-micro font-semibold uppercase text-accent">Model&rsquo;s captain pick</p>
-        <p className="truncate font-display text-h3 font-bold text-fg sm:text-h2">{top.player_name}</p>
+        <p className="truncate font-display text-h3 font-bold text-fg sm:text-h2" title={top.player_name}>
+          {displayName(top.player_name, top.web_name)}
+        </p>
         <p className="flex items-center gap-1.5 text-data text-fg-muted">
           {top.team_name && <ClubCrest team={top.team_name} size={16} />}
           <span className="truncate">{[top.team_name, oppLabel].filter(Boolean).join(' · ')}</span>
         </p>
         {rest.length > 0 && (
           <p className="mt-1 truncate text-micro text-fg-subtle">
-            Next best: {rest.slice(0, 2).map((p) => `${lastName(p.player_name)} ${p.predicted_points.toFixed(1)}`).join(' · ')}
+            Next best: {rest.slice(0, 2).map((p) => `${shortName(p.player_name, p.web_name)} ${p.predicted_points.toFixed(1)}`).join(' · ')}
           </p>
         )}
       </div>
@@ -355,7 +354,9 @@ function TopPicks() {
                 <PlayerAvatar name={p.player_name} src={avatars[p.player_name]} size={44} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
-                    <span className="truncate text-sm font-semibold text-fg">{p.player_name}</span>
+                    <span className="truncate text-sm font-semibold text-fg" title={p.player_name}>
+                      {displayName(p.player_name, p.web_name)}
+                    </span>
                     <StatusBadge status={p.status} chance={p.chance_of_playing_next_round} news={p.news} />
                   </span>
                   <span className="flex items-center gap-1.5 text-data text-fg-subtle">

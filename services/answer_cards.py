@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 PhotoFn = Callable[[str, Optional[str], Optional[int]], Optional[str]]
 
 MAX_CARDS = 3
+MAX_TRANSFER_CARDS = 3   # comparison cards for a transfer question, one per (sold, bought) move
 MAX_FOLLOW_UPS = 4
 MAX_HIGHLIGHTS = 4
 FORM_LENGTH = 8          # recent matches in a player's sparkline
@@ -1708,6 +1709,17 @@ def plan(ctx: CardContext) -> List[Awaitable[Any]]:
 
     if intent == "team_of_the_week":
         return [build_pitch_card(ctx)]
+    if intent == "transfer_advice":
+        # One comparison per move, sold player first, this season with the predictions on top
+        moves = [m for m in (params.get("transfer_moves") or []) if len(m) == 2 and all(m)]
+        if moves:
+            return [build_comparison_card(ctx, list(m), ctx.current_season, emphasis="prediction")
+                    for m in moves[:MAX_TRANSFER_CARDS]]
+        if len(players) >= 2:
+            return [build_comparison_card(ctx, players[:2], ctx.current_season, emphasis="prediction")]
+        if players:
+            return [build_player_card(ctx, players[0], ctx.current_season, emphasis="prediction")]
+        return []
     if intent == "prediction":
         if len(players) >= 2:
             return [build_comparison_card(ctx, players[:2], season or ctx.current_season, emphasis="prediction")]
@@ -1718,7 +1730,9 @@ def plan(ctx: CardContext) -> List[Awaitable[Any]]:
             return [build_fixture_picks_card(ctx)]
         return [build_prediction_card(ctx)]
     if intent == "player_comparison" and len(players) >= 2:
-        return [build_comparison_card(ctx, players[:2], season)]
+        # "Who's the better pick this week, Salah or Saka?" (params["forecast"]): predictions first
+        return [build_comparison_card(ctx, players[:2], season,
+                                      emphasis="prediction" if params.get("forecast") else "stats")]
     if intent in ("player_stats", "player_comparison", "player_search") and players:
         return [build_player_card(ctx, players[0], season, params.get("gameweek"))]
     if ctx.method == "get_team_squad" and params.get("team_name"):

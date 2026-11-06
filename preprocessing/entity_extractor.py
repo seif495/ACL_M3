@@ -17,6 +17,62 @@ _POSSESSIVE_RE = re.compile(r"['’]s?$")
 # Words that join club names inside one spaCy entity ("Aston Villa vs Arsenal").
 _CLUB_JOINERS = {"vs", "v", "versus", "and", "or"}
 
+# Pronouns that can point back at players from earlier in the conversation. A singular one
+# means one player; a plural one up to two ("Compare Salah and Saka" -> "Who has the better
+# fixtures out of them?").
+SINGULAR_PRONOUN_RE = re.compile(r"\b(?:he|him|his|himself)\b", re.IGNORECASE)
+PLURAL_PRONOUN_RE = re.compile(
+    r"\b(?:they|them|their|theirs|themselves|both|(?:these|those|the)\s+two)\b", re.IGNORECASE)
+# Plural wording that picks among players ("which of them", "both"), as opposed to a plain
+# "they", which after a club question means the club ("How are Arsenal doing?" -> "Who do they
+# play next?")
+_PARTITIVE_RE = re.compile(
+    r"\b(?:both|(?:these|those|the)\s+two|(?:of|between|out\s+of)\s+(?:them|these|those|the\s+two))\b",
+    re.IGNORECASE)
+# How many earlier exchanges (question + answer) a pronoun looks back through, and how many
+# levels of pronouns in those questions are resolved in turn
+HISTORY_EXCHANGES = 3
+_HISTORY_DEPTH = 2
+
+
+def history_exchanges(chat_history: Optional[List[Dict[str, str]]],
+                      limit: int = HISTORY_EXCHANGES) -> List[Tuple[str, str]]:
+    """(user question, assistant answer) pairs from a chat history, newest first.
+
+    A user message starts an exchange and the assistant's reply completes it; an assistant
+    message with no question before it (a greeting) is an exchange with an empty question.
+    """
+    exchanges: List[List[str]] = []
+    for msg in chat_history or []:
+        role, content = msg.get("role"), str(msg.get("content") or "")
+        if role == "user":
+            exchanges.append([content, ""])
+        elif role == "assistant":
+            if exchanges and not exchanges[-1][1]:
+                exchanges[-1][1] = content
+            else:
+                exchanges.append(["", content])
+    return [(question, answer) for question, answer in reversed(exchanges)][:limit]
+
+
+def _unique(names: Iterable[str]) -> List[str]:
+    out: List[str] = []
+    for name in names:
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def _locate(text: str, name: str) -> Optional[Tuple[int, int]]:
+    """(start, end) of a player's name in the text as a whole word: the full name, else the
+    surname, else another word of it (3+ letters), case-insensitively; None if absent."""
+    words = [w for w in name.split() if len(w) >= 3]
+    for key in [name] + words[::-1]:
+        match = re.search(rf"(?<!\w){re.escape(key)}(?!\w)", text, re.IGNORECASE)
+        if match:
+            return match.start(), match.end()
+    return None
+
 
 def _keyword_regex(keys: Iterable[str]) -> "re.Pattern[str]":
     """Match any of the (lowercase) keys as whole words.
@@ -369,61 +425,93 @@ class EntityExtractor:
         
         # Extract players (do this last, using other entities for context)
         entities.players = self._extract_players(doc, entities)
-        
-        # If no players found but query has pronouns, check chat history
-        if not entities.players and chat_history:
-            query_lower = query.lower()
-            has_pronoun = bool(re.search(r'\b(he|she|they|him|her|his|hers|their)\b', query_lower))
-            if has_pronoun:
-                # Extract players from recent conversation
-                history_players = self._extract_players_from_history(chat_history)
-                if history_players:
-                    entities.players = history_players
-        
-        return entities
-    
-    def _extract_players_from_history(self, chat_history: List[Dict[str, str]]) -> List[str]:
-        """
-        Extract player names from recent chat history for pronoun resolution.
-        
-        Args:
-            chat_history: Conversation history
-            
-        Returns:
-            List of player names found in recent messages
-        """
-        players = []
-        # Check last 3 messages for player names
-        recent_messages = chat_history[-3:] if len(chat_history) >= 3 else chat_history
 
-        if self.player_index is not None:
-            for msg in reversed(recent_messages):  # most recent mention wins
-                found = self._player_mentions(msg.get('content', ''), limit=1)
-                if found:
-                    return found
+        # Pronouns that point back at players from earlier exchanges ("Is he a better captain
+        # than Haaland?" after a question about Isak: Isak, then Haaland)
+        if chat_history:
+            entities.players = self.resolve_pronouns(query, entities.players, history_exchanges(chat_history))
+
+        return entities
+
+    def resolve_pronouns(self, text: str, players: List[str], exchanges: List[Tuple[str, str]],
+                         depth: int = _HISTORY_DEPTH) -> List[str]:
+        """`players` (named in `text`) plus the players its pronouns refer to.
+
+        `exchanges` are the earlier (question, answer) pairs, newest first (history_exchanges).
+        - A singular pronoun (he/him/his) before any named player, or with none named, is a
+          player from the history, put first: "Is he a better captain than Haaland?". After a
+          named player it is that player: "Haaland is in form, is he worth captaining?".
+        - A plural pronoun (they/them/both/"the two") with no player named takes up to two
+          players from the history: "Who has the better fixtures out of them?". Not when a
+          club is named before it ("Arsenal are flying, are they worth a triple-up?").
+        """
+        singular = SINGULAR_PRONOUN_RE.search(text)
+        plural = PLURAL_PRONOUN_RE.search(text)
+        if not exchanges or depth < 0 or not (singular or plural):
+            return players
+        first_named = self.first_player_position(text, players)
+        if singular and (first_named is None or singular.start() < first_named):
+            earlier = self._antecedent(exchanges, 1, partitive=False, depth=depth)
+            return _unique(earlier + list(players))
+        if plural and not players and not any(start < plural.start() for start, _end, _team in self.find_team_spans(text)):
+            return self._antecedent(exchanges, 2, partitive=bool(_PARTITIVE_RE.search(text)), depth=depth)
+        return players
+
+    def _antecedent(self, exchanges: List[Tuple[str, str]], count: int, partitive: bool, depth: int) -> List[str]:
+        """Up to `count` players a pronoun refers to, from the newest exchange that has any.
+
+        Within an exchange the players the user's own question named come first (its pronouns
+        resolved against the exchanges before it); the assistant's answer is used only when the
+        question named none, since an answer also names rivals and alternatives. After a club
+        question ("How are Arsenal doing?") a plain "they" is the club, so no player.
+        """
+        for i, (question, answer) in enumerate(exchanges):
+            named = self.players_in(question)
+            if depth > 0:
+                named = self.resolve_pronouns(question, named, exchanges[i + 1:], depth - 1)
+            if named:
+                return named[:count]
+            if count > 1 and not partitive and question and self.find_teams(question):
+                return []
+            found = self.players_in(answer, limit=count)
+            if found:
+                return found
+        return []
+
+    def players_in(self, text: str, limit: int = 2) -> List[str]:
+        """Players named in a piece of text (an earlier question or answer), in order."""
+        if not text:
             return []
-        
-        # Common words to exclude
-        common_words = {
-            'premier', 'league', 'season', 'gameweek', 'week', 'top', 'best', 'most',
-            'points', 'goals', 'assists', 'player', 'team', 'stats', 'performance',
-            'who', 'what', 'when', 'where', 'how', 'which', 'the', 'and', 'for',
-            'with', 'from', 'this', 'that', 'would', 'should', 'could', 'like',
-            'next', 'upcoming', 'forecast', 'predict', 'earn', 'score', 'get'
-        }
-        
-        for msg in recent_messages:
-            content = msg.get('content', '')
-            # Look for capitalized words (likely proper names)
-            words = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', content)
-            for word in words:
-                if word.lower() not in common_words and len(word) > 3:
-                    # Check if it looks like a player name (at least one capital letter after first word)
-                    parts = word.split()
-                    if len(parts) >= 1:  # Single name like "Haaland" or full name
-                        players.append(word)
-        
-        return players[:1]  # Return most recent player mentioned
+        if self.player_index is not None:
+            return self._player_mentions(text, limit=limit)
+        return self._extract_players(self.nlp(text), ExtractedEntities())[:limit]
+
+    def player_mention_spans(self, text: str) -> List[Tuple[int, int, str]]:
+        """Every player mention in the text as (start, end, player name), in order, without
+        the limit of two that `extract` keeps (a transfer question can name four or more).
+        Words of a club's name are skipped as in `extract`. Without the player index, the
+        players `extract` finds are located in the text by name or surname."""
+        if self.player_index is not None:
+            return self._player_mention_spans(text)
+        spans = []
+        for name in self._extract_players(self.nlp(text), ExtractedEntities()):
+            located = _locate(text, name)
+            if located:
+                spans.append((located[0], located[1], name))
+        return sorted(spans)
+
+    def first_player_position(self, text: str, players: List[str]) -> Optional[int]:
+        """Where the first of `players` is named in the text; None when no player is named.
+        A player that can't be located counts as named at the start, so a pronoun is then
+        read as referring to him (the safe reading: no player from the history is added)."""
+        if not players:
+            return None
+        if self.player_index is not None:
+            starts = [start for start, _end, name in self._player_mention_spans(text) if name in players]
+            if starts:
+                return min(starts)
+        located = [found[0] for found in (_locate(text, name) for name in players) if found]
+        return min(located) if located else 0
     
     @classmethod
     def find_teams(cls, text: str) -> List[str]:
@@ -444,16 +532,20 @@ class EntityExtractor:
         and "Leeds" isn't a misspelt Lees-Melou. A player named in full still counts, even
         when a club shares a word of the name ("How did Conor Coventry do?").
         """
+        return _unique(name for _start, _end, name in self._player_mention_spans(text))[:limit]
+
+    def _player_mention_spans(self, text: str) -> List[Tuple[int, int, str]]:
+        """The index's mentions in the text as (start, end, name), minus club words (see
+        _player_mentions). A player named twice is listed twice."""
         if not text:
             return []
         clubs = self.find_team_spans(text)
-        names: List[str] = []
+        spans: List[Tuple[int, int, str]] = []
         for start, end, name, full_name in self.player_index.mention_spans(text):
             if not full_name and any(start < c_end and c_start < end for c_start, c_end, _ in clubs):
                 continue
-            if name not in names:
-                names.append(name)
-        return names[:limit]
+            spans.append((start, end, name))
+        return spans
 
     def _extract_teams(self, doc: Doc) -> List[str]:
         """Extract team names from the query, in the order they're mentioned.

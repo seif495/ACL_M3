@@ -7,6 +7,7 @@ import {
   type ModelReviewResponse,
 } from '../../services/api';
 import { cn } from '../../utils/cn';
+import { displayName } from '../../utils/playerNames';
 import {
   Button,
   Card,
@@ -236,6 +237,7 @@ function Bench({ review, replacedBy }: { review: ModelReviewResponse; replacedBy
                 <span className="flex items-center gap-1.5">
                   <PlayerNameButton
                     player={{ name: p.name, team: p.team, position: p.position, photo: p.photo }}
+                    label={displayName(p.name, p.web_name)}
                     className="text-sm font-semibold text-fg"
                   />
                   <ArmbandTag player={p} />
@@ -319,6 +321,7 @@ function ComparisonTable({
             <span className="flex items-center gap-1.5">
               <PlayerNameButton
                 player={{ name: p.name, team: p.team, position: p.position, photo: p.photo }}
+                label={displayName(p.name, p.web_name)}
                 className={cn('max-w-[7.5rem] truncate font-semibold sm:max-w-[14rem]', bench && 'text-fg-muted')}
               />
               <ArmbandTag player={p} />

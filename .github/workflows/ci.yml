@@ -1,7 +1,8 @@
 name: CI
 
-# Runs the backend test suite and the frontend lint and build on every pull request and on
-# pushes to main. Tests mock Neo4j and the LLMs, so no secrets or services are needed.
+# Runs the backend test suite, the frontend lint and build, and a check of the production
+# Caddyfile on every pull request and on pushes to main. Tests mock Neo4j and the LLMs, so no
+# secrets or services are needed.
 on:
   pull_request:
   push:
@@ -52,3 +53,15 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+
+  caddy:
+    name: Caddyfile check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      # The image production's web container builds from (deploy/web.Dockerfile). A Caddyfile that
+      # doesn't parse would take the whole site down at the next deploy.
+      - name: caddy validate
+        run: |
+          docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" -e SITE_ADDRESS=localhost             caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

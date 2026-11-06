@@ -59,11 +59,12 @@ You present data clearly and draw meaningful conclusions."""
         data_scope: Optional[str] = None,
         is_first_message: bool = False,
         chat_history: Optional[List[Dict[str, str]]] = None,
-        model_key: Optional[str] = None
+        model_key: Optional[str] = None,
+        transfer_context: Optional[str] = None,
     ) -> str:
         """
         Template for Q&A responses.
-        
+
         Args:
             question: User's question
             kg_context: Context from Cypher queries
@@ -73,6 +74,8 @@ You present data clearly and draw meaningful conclusions."""
             data_scope: Description of the data scope (e.g., "all seasons (...)" or "2025-26 season")
             chat_history: Previous conversation messages for context
             model_key: The model being used (to customize prompt)
+            transfer_context: Optional Transfer Analysis (services/transfer_advice.py) for a
+                "sell X for Y" question, with its own answering rules
         """
         # Use enhanced persona for Llama 3.3 70B
         if model_key in ("gpt-oss-120b", "gpt-oss-20b", "llama-3.3-70b"):
@@ -137,7 +140,23 @@ FirstMessage: {str(is_first_message)}
 ### ML Predictions (XGBoost Forecast):
 {ml_context}
 """
-        
+
+        transfer_rules = ""
+        if transfer_context:
+            template += f"""
+### Transfer Analysis ({CURRENT_SEASON} season so far and ML forecasts for the next gameweeks):
+{transfer_context}
+"""
+            transfer_rules = f"""
+**TRANSFER ADVICE RULES (a Transfer Analysis is given above):**
+- Lead with the recommendation for each move (make it, skip it, or which one to make first), then the 2-3 numbers that decide it: the predicted gain next gameweek, the projected gain over the next gameweeks, and the price difference.
+- Free transfers: each move beyond the free transfers costs 4 points. Only recommend a hit when the move's projected gain clearly beats the 4 points; say what the hit costs.
+- Quote only the Transfer Analysis: this season's numbers ("so far in {CURRENT_SEASON}") and the forecasts. Never use a career total, a best season or an earlier season.
+- Mention a player's availability flag when he has one, and the fixtures when they decide it.
+- If the analysis lists a name as not found, say plainly that you couldn't find that player; don't guess who was meant.
+- Keep it short: a few sentences or one line per move.
+"""
+
         template += f"""
 ### User Question:
 {question}
@@ -161,7 +180,8 @@ FirstMessage: {str(is_first_message)}
 - If ML Predictions show Haaland with 8.03 predicted points, that is THE answer when asked "who should I pick" or "how many points will he get".
 - NEVER ignore ML Predictions when they are present - they are the most important data for future performance questions.
 - A ranked ML list is in order, best first. When you name a second choice or an alternative, it is the next entry in that order; for a position ("a midfield option"), it is that position's highest-ranked entry. Never skip a higher-ranked player for a better-known one, and never call a player "next" when someone is ranked between them.
-
+- When the ML Predictions list several players, compare them on their own numbers. Never say a player has no forecast when he has a line above; only a player whose entry says he is not in the current FPL game has none.
+{transfer_rules}
 **UNDERSTANDING USER INTENT:**
 - Vague responses like "hmm", "i dont know", "not sure", "maybe" mean the user is UNCERTAIN - offer helpful choices
 - When user is uncertain, DON'T force information - instead say: "Would you like to hear about [specific option A] or [specific option B]?"

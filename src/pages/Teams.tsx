@@ -30,34 +30,40 @@ export function Teams() {
                 const c = clubColors(t.team);
                 return (
                   <li key={t.team}>
-                    <Link
-                      to={teamPath(t.team)}
+                    {/* The club name is the link, stretched over the card by its ::after; the form
+                        chips are links of their own above it (a link inside a link is invalid HTML) */}
+                    <div
                       style={{ '--c1': c.primary } as CSSProperties}
-                      className="group relative block overflow-hidden rounded-lg border border-line bg-surface p-4 transition hover:-translate-y-0.5 hover:border-line-strong hover:shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      className="group relative isolate block overflow-hidden rounded-lg border border-line bg-surface p-4 transition hover:-translate-y-0.5 hover:border-line-strong hover:shadow-pop"
                     >
                       <span
                         aria-hidden="true"
-                        className="absolute inset-0 opacity-60 transition-opacity group-hover:opacity-100"
+                        className="absolute inset-0 -z-10 opacity-60 transition-opacity group-hover:opacity-100"
                         style={{ background: 'radial-gradient(90% 110% at 0% 0%, rgb(var(--c1) / 0.35), transparent 60%)' }}
                       />
-                      <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-0.5" style={{ background: 'rgb(var(--c1))' }} />
-                      <span className="relative flex items-center gap-3">
+                      <span aria-hidden="true" className="absolute inset-x-0 bottom-0 -z-10 h-0.5" style={{ background: 'rgb(var(--c1))' }} />
+                      <span className="flex items-center gap-3">
                         <ClubCrest team={t.team} size={48} className="transition-transform group-hover:scale-110" />
                         <span className="min-w-0">
-                          <span className="block truncate font-display text-h3 font-bold text-fg">{t.team}</span>
+                          <Link
+                            to={teamPath(t.team)}
+                            className="block truncate font-display text-h3 font-bold text-fg after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-accent"
+                          >
+                            {t.team}
+                          </Link>
                           <span className="text-data text-fg-muted">
                             {t.played ? `${t.position}${t.position === 1 ? 'st' : t.position === 2 ? 'nd' : t.position === 3 ? 'rd' : 'th'} · ${t.points} pts` : 'No matches yet'}
                           </span>
                         </span>
                       </span>
-                      <span className="relative mt-3 flex items-center justify-between">
-                        <FormChips items={(t.recent ?? []).map((r) => ({ ...r }))} size="sm" />
+                      <span className="mt-3 flex items-center justify-between">
+                        <FormChips items={(t.recent ?? []).map((r) => ({ ...r }))} size="sm" className="relative z-10" />
                         <span className="text-micro tabular-nums text-fg-subtle">
                           {t.goal_difference > 0 ? '+' : ''}
                           {t.goal_difference} GD
                         </span>
                       </span>
-                    </Link>
+                    </div>
                   </li>
                 );
               })}

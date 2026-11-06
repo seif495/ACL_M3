@@ -5,6 +5,8 @@ import { cn } from '../utils/cn';
 
 interface PlayerWithClubProps {
   playerName: string;
+  /** Text to show instead of playerName (a short name); playerName stays the photo's name and tooltip. */
+  displayName?: string;
   teamName?: string | null;
   showAbbreviation?: boolean;
   logoSize?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
@@ -42,7 +44,10 @@ export function PlayerWithClub(props: PlayerWithClubProps) {
     avatar,
     avatarSize = 36,
     meta,
+    displayName,
   } = props;
+  const shown = displayName || playerName;
+  const fullTitle = shown !== playerName ? playerName : undefined;
   const abbreviation = getClubAbbreviation(teamName) || (teamName ?? '').slice(0, 3).toUpperCase();
   const crestPx = CREST_PX[logoSize];
   const twoLine = 'avatar' in props || meta != null;
@@ -52,7 +57,7 @@ export function PlayerWithClub(props: PlayerWithClubProps) {
       <span className={cn('flex min-w-0 items-center gap-2.5', className)}>
         <PlayerAvatar name={playerName} src={avatar} size={avatarSize} />
         <span className="min-w-0">
-          <span className={cn('block truncate font-semibold text-fg', nameClassName)}>{playerName}</span>
+          <span className={cn('block truncate font-semibold text-fg', nameClassName)} title={fullTitle}>{shown}</span>
           <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-data text-fg-subtle">
             {teamName && <ClubCrest team={teamName} size={Math.min(crestPx, 16)} />}
             {teamName && (
@@ -70,7 +75,7 @@ export function PlayerWithClub(props: PlayerWithClubProps) {
   return (
     <span className={cn('flex min-w-0 items-center gap-2', className)}>
       {teamName && <ClubCrest team={teamName} size={crestPx} />}
-      <span className={cn('truncate', nameClassName)}>{playerName}</span>
+      <span className={cn('truncate', nameClassName)} title={fullTitle}>{shown}</span>
       {showAbbreviation && teamName && (
         <span className={cn('shrink-0 text-micro font-semibold text-fg-subtle', clubClassName)}>{abbreviation}</span>
       )}

@@ -4,6 +4,7 @@ import { Info, Lightbulb, RefreshCw, Sparkles } from 'lucide-react';
 import { apiService, handleApiError, MLPrediction } from '../services/api';
 import { useAppStore } from '../store/appStore';
 import { cn } from '../utils/cn';
+import { displayName } from '../utils/playerNames';
 import { getClubAbbreviation } from '../utils/clubLogos';
 import { PlayerWithClub } from '../components/PlayerWithClub';
 import { usePlayerAvatars } from '../hooks/usePlayerAvatars';
@@ -138,6 +139,7 @@ function PlayerCell({
       )}
       <PlayerWithClub
         playerName={row.player_name}
+        displayName={displayName(row.player_name, row.web_name)}
         teamName={row.team_name}
         avatar={avatar}
         avatarSize={36}
@@ -341,7 +343,7 @@ export function Predictions() {
     key: 'player',
     header: 'Player',
     sticky: true,
-    sortValue: (r) => r.player_name,
+    sortValue: (r) => displayName(r.player_name, r.web_name),
     render: (r) => (
       <PlayerCell
         row={r}

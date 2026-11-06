@@ -132,7 +132,7 @@ export function ModelInsights() {
 
       <TabPanel idPrefix="model" value={view} className="pt-5">
         {view === 'overview' &&
-          (summaryProblem ?? (s ? <ExplainOverview summary={s} onPickPlayer={pickPlayer} /> : <ExplainSkeleton label="Loading the model insights…" blocks={3} />))}
+          (summaryProblem ?? (s ? <ExplainOverview summary={s} onPickPlayer={pickPlayer} /> : <ExplainSkeleton label="Loading the model insights…" blocks={3} slowTitle="Working out what drives the predictions" />))}
 
         {view === 'player' && (
           <div className="space-y-6">
@@ -177,7 +177,7 @@ export function ModelInsights() {
                 updating={player.isFetching && player.isPlaceholderData}
               />
             ) : (
-              <ExplainSkeleton label="Working out the explanation…" />
+              <ExplainSkeleton label="Working out the explanation…" slowTitle="Working out this player’s explanation" />
             )}
           </div>
         )}
@@ -185,7 +185,7 @@ export function ModelInsights() {
         {view === 'effects' &&
           (summaryProblem ??
             (!s ? (
-              <ExplainSkeleton label="Loading the features…" />
+              <ExplainSkeleton label="Loading the features…" slowTitle="Working out the feature effects" />
             ) : !feature ? (
               <Card padded={false}>
                 <EmptyState title="No features to show" description="The explanation has no feature list for this gameweek." />

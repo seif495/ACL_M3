@@ -32,6 +32,7 @@ import { PITCH_LINES } from '../components/totw/pitchLines';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { usePlayerDialog } from '../hooks/usePlayerDialog';
 import { PlayerNameButton } from '../components/players/PlayerNameButton';
+import { displayName } from '../utils/playerNames';
 
 // The page's tabs: the two squads from /api/team-of-the-week, the model's past picks against what
 // they scored (/api/model-review), and the season-long team the model manages (/api/ml-manager).
@@ -267,6 +268,7 @@ export function TeamOfTheWeek() {
                         <span className="min-w-0 flex-1">
                           <PlayerNameButton
                             player={{ name: p.name, team: p.team, position: p.position, photo: p.photo, status: p.status, news: p.news }}
+                            label={displayName(p.name, p.web_name)}
                             className="block text-sm font-semibold text-fg"
                           />
                           <ClubCrest team={p.team} size={14} label="full" className="text-data text-fg-subtle" />

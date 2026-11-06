@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 from xml.sax.saxutils import escape as xml_escape
 
 from fastapi import FastAPI, Request
@@ -131,8 +131,16 @@ def site_origin(headers: Mapping[str, str], scheme: str = "https") -> str:
 
 
 def normalize_path(raw: Optional[str]) -> str:
-    """The page path a crawler asked for: no query, fragment or trailing slash."""
-    path = (raw or "/")[:MAX_PATH_LENGTH].split("?")[0].split("#")[0].strip() or "/"
+    """The page path a crawler asked for: no query, fragment or trailing slash. Percent-escapes
+    are undone (twice over at most): a proxy that escapes the path into the query string, and
+    then has the query escaped again, sends "%252Fteams%252Farsenal" for "/teams/arsenal"."""
+    path = (raw or "/")[:MAX_PATH_LENGTH]
+    for _ in range(3):
+        decoded = unquote(path)
+        if decoded == path:
+            break
+        path = decoded
+    path = path.split("?")[0].split("#")[0].strip() or "/"
     if not path.startswith("/"):
         path = "/" + path
     return path.rstrip("/") or "/"

@@ -354,3 +354,15 @@ def test_sitemap_route(monkeypatch):
     ss.clear_cache()                        # the fixtures above are cached
     _, failing = client_with(lambda: FakeConn(fail=True))
     assert failing.get("/api/seo/sitemap.xml").status_code == 503
+@pytest.mark.parametrize("raw", ["/teams/arsenal", "%2Fteams%2Farsenal", "%252Fteams%252Farsenal", "/teams/arsenal/"])
+def test_normalize_path_undoes_escaping(raw):
+    # The live Caddy once sent the path escaped twice ("%252F"); every form means the same page
+    assert seo.normalize_path(raw) == "/teams/arsenal"
+
+
+def test_preview_with_an_escaped_path_still_finds_the_club():
+    _, client = client_with(lambda: FakeConn())
+    for query in ("path=%2Fteams%2Farsenal", "path=%252Fteams%252Farsenal"):
+        r = client.get(f"/api/seo/preview?{query}")
+        assert r.status_code == 200 and "<title>Arsenal" in r.text, query
+        assert "%25" not in r.text and "%2F" not in r.text   # the canonical URL is the plain path

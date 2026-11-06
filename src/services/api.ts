@@ -1613,6 +1613,18 @@ export const apiService = {
     return data;
   },
 
+  /** A visitor's FPL team by its ID. 404 no such team, 409 no squad yet, 502 FPL not answering, 429 rate limit. */
+  async getMyTeam(id: number, signal?: AbortSignal): Promise<MyTeamView> {
+    const { data } = await api.get<MyTeamView>(`/api/my-team/${id}`, { signal });
+    return data;
+  },
+
+  /** The planner's best transfers for that team (5–15 s). 503 no projections yet or busy, 422 no valid plan. */
+  async planMyTeam(id: number, options: MyTeamPlanOptions): Promise<MyTeamPlan> {
+    const { data } = await api.post<MyTeamPlan>(`/api/my-team/${id}/plan`, options, { timeout: 90_000 });
+    return data;
+  },
+
   // Model insights (SHAP / LIME). 503 until the first prediction run has written explanations.
   async getExplainSummary(signal?: AbortSignal): Promise<ExplainSummary> {
     const { data } = await api.get<ExplainSummary>('/api/ml/explain/summary', { signal });
@@ -1696,6 +1708,154 @@ export interface SiteStats {
   top_countries: { code: string | null; country: string; visitors: number }[];
   top_zones: { zone: string; visitors: number }[];
 }
+
+// --- My team (a visitor's FPL team imported by its ID) -----------------------------------------
+// Prices are tenths of £1m, as FPL stores them.
+
+export interface MyTeamEntry {
+  id: number;
+  name: string;
+  manager: string;
+  overall_points: number | null;
+  overall_rank: number | null;
+  event_points: number | null;
+  last_gameweek: number | null;
+  started_gameweek: number | null;
+}
+
+export interface MyTeamChip {
+  chip: MlManagerChip;
+  label: string;
+  half: number;
+  window: [number, number];
+  used_gameweek: number | null;
+  planned?: boolean;
+  available: boolean;
+  active: boolean;
+}
+
+export interface MyTeamProjection {
+  gameweek: number;
+  points: number;
+}
+
+export interface MyTeamPlayer {
+  element: number;
+  name: string;
+  web_name: string | null;
+  team: string;
+  position: PositionCode;
+  now_cost: number;
+  purchase_price: number | null;
+  selling_price: number | null;
+  purchase_source?: string | null;
+  status: string | null;
+  chance: number | null;
+  news: string | null;
+  predicted_points: number | null;
+  opponents: { team: string; home: boolean }[];
+  projected: MyTeamProjection[];
+  projected_total: number | null;
+  photo: string | null;
+}
+
+export interface MyTeamLineup {
+  starters: number[];
+  /** In substitution order. */
+  bench: number[];
+  captain: number | null;
+  vice_captain: number | null;
+  formation: string;
+  projected_points: number;
+}
+
+export interface MyTeamHistoryRow {
+  gameweek: number;
+  /** Before the transfer cost. */
+  points: number | null;
+  transfer_cost: number;
+  overall_rank: number | null;
+  average: number | null;
+  chip: MlManagerChip | null;
+}
+
+export interface MyTeamView {
+  entry: MyTeamEntry;
+  /** The next gameweek. */
+  gameweek: number;
+  deadline: string | null;
+  predictions_gameweek: number | null;
+  based_on_gameweek: number | null;
+  pending_transfers: unknown[];
+  bank: number;
+  team_value: number;
+  free_transfers: number;
+  chips: MyTeamChip[];
+  squad: MyTeamPlayer[];
+  lineup: MyTeamLineup;
+  history: MyTeamHistoryRow[];
+}
+
+export interface MyTeamPlanOptions {
+  free_transfers?: number;
+  max_hits: number;
+  horizon: number;
+  chips: boolean;
+}
+
+export interface MyTeamPlanSide {
+  element: number;
+  name: string;
+  web_name: string | null;
+  position: PositionCode;
+  team: string;
+}
+
+export interface MyTeamPlanPlayer {
+  element: number;
+  name: string;
+  web_name: string | null;
+  position: PositionCode;
+  team: string;
+  purchase_price: number | null;
+  selling_price: number | null;
+  now_cost: number;
+  predicted_points: number | null;
+  role: 'starter' | 'bench';
+  bench_order: number | null;
+  captain: boolean;
+  vice_captain: boolean;
+  photo: string | null;
+}
+
+export interface MyTeamPlan {
+  season?: string;
+  gameweek: number;
+  deadline: string | null;
+  chip: MlManagerChip | null;
+  transfers: {
+    out: MyTeamPlanSide & { selling_price: number };
+    in: MyTeamPlanSide & { price: number };
+  }[];
+  free_transfers: number;
+  transfers_made: number;
+  hits: number;
+  hit_cost: number;
+  bank_before: number;
+  bank_after: number;
+  squad: MyTeamPlanPlayer[];
+  projected_points: number;
+  horizon: { gameweek: number; projected: number; transfers: number; hits: number; free_transfers: number }[];
+  reason: string | null;
+  optimal: boolean;
+  inputs: MyTeamPlanOptions;
+  /** The current squad's best XI, for comparison. */
+  current_projected: number;
+}
+
+/** The HTTP status of a failed request, if it had a response. */
+export const httpStatusOf = (error: unknown): number | null =>
+  axios.isAxiosError(error) ? (error.response?.status ?? null) : null;
 
 // Error handling
 export const handleApiError = (error: unknown): string => {

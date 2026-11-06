@@ -109,6 +109,13 @@ export function Privacy() {
             open takes you to theguardian.com, which has its own privacy policy.
           </li>
           <li>
+            <strong>Your FPL team, if you import it on My team:</strong> when you enter a team ID, our server fetches
+            that team's public data from the Fantasy Premier League site, the same data anyone can see there. We use it
+            to show predictions and plan transfers. It isn't stored, apart from a cache of a few minutes. Your browser
+            remembers the ID so you don't have to type it again, and <strong>Forget this ID</strong> on the page clears
+            it. Our server's access logs record the address requested, which contains the ID.
+          </li>
+          <li>
             <strong>Links to GitHub</strong> take you to GitHub, which has its own privacy policy.
           </li>
         </ul>

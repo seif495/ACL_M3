@@ -88,7 +88,7 @@ def _use_page_meta(file):
 
 
 PAGE_FILES = {"/": "Home.tsx", "/fixtures": "Fixtures.tsx", "/table": "LeagueTable.tsx", "/teams": "Teams.tsx",
-              "/team-of-the-week": "TeamOfTheWeek.tsx", "/players": "PlayerSearch.tsx",
+              "/my-team": "MyTeam.tsx", "/team-of-the-week": "TeamOfTheWeek.tsx", "/players": "PlayerSearch.tsx",
               "/predictions": "Predictions.tsx", "/model": "ModelInsights.tsx", "/assistant": "QAAssistant.tsx",
               "/compare": "PlayerComparison.tsx", "/trivia": "Trivia.tsx", "/settings": "Settings.tsx",
               "/privacy": "Privacy.tsx", "/terms": "Terms.tsx", "/contact": "Contact.tsx", "/stats": "SiteStats.tsx"}

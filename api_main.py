@@ -11,6 +11,7 @@ from utils.console import ensure_utf8_stdio
 ensure_utf8_stdio()  # before any startup print/log (emoji crash cp1252 on Windows)
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Header, Query, Request
+from fastapi import Path as FastApiPath
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -2930,6 +2931,63 @@ class AnalyticsSummaryResponse(BaseModel):
     top_referrers: List[AnalyticsReferrer]
     top_countries: List[AnalyticsCountry]
     top_zones: List[AnalyticsZone]
+
+
+# ------------------------------------------------------------------------- My team
+# A visitor's own FPL team by its ID (services/my_team.py): imported from FPL's public API,
+# scored with the predictions, and planned with the ML manager's planner. Each import asks FPL
+# 4 things (cached 5 minutes per team) and a plan takes a CPU core for a few seconds, so both
+# have their own per-client limits. Override with MY_TEAM_RATE_LIMITS / MY_TEAM_PLAN_RATE_LIMITS.
+my_team_limiter = RateLimiter(limits_from_env("MY_TEAM_RATE_LIMITS", "20/60,200/3600"))
+my_team_plan_limiter = RateLimiter(limits_from_env("MY_TEAM_PLAN_RATE_LIMITS", "4/60,30/3600"))
+
+
+class MyTeamPlanRequest(BaseModel):
+    """Options for a transfer plan; free_transfers overrides the count replayed from the history."""
+    free_transfers: Optional[int] = Field(None, ge=0, le=5)
+    max_hits: int = Field(0, ge=0, le=2)
+    horizon: int = Field(4, ge=1, le=4)
+    chips: bool = False
+
+
+def _my_team_call(fn, *args, **kwargs):
+    """Run a services/my_team call, turning its errors into HTTP statuses and `_code` into photos."""
+    from services import my_team, team_optimizer
+    try:
+        return season_service.with_photos(fn(*args, **kwargs), _photo_for)
+    except my_team.TeamNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except my_team.TeamNotReady as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except my_team.FplUnavailable as exc:
+        logger.warning("My team: %s", exc)
+        detail = str(exc) if exc.updating else "FPL isn't answering right now. Try again in a minute."
+        raise HTTPException(status_code=502, detail=detail)
+    except (my_team.PlanUnavailable, my_team.PlanBusy) as exc:
+        raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "60"})
+    except team_optimizer.InfeasibleError as exc:
+        raise HTTPException(status_code=422, detail=f"No valid plan for this squad: {exc}")
+
+
+@app.get("/api/my-team/{entry_id}", dependencies=[Depends(my_team_limiter.dependency)])
+def my_team_view(entry_id: int = FastApiPath(..., ge=1, le=99_999_999)):
+    """One FPL team by its ID: squad with selling prices, next-gameweek predictions and the next
+    4 weeks' projections, the suggested XI and armband, bank, free transfers (replayed from the
+    history), chips and the season's gameweeks. 404 unknown team, 409 no squad yet, 502 FPL down."""
+    from services import my_team
+    return _my_team_call(my_team.get_team, entry_id)
+
+
+@app.post("/api/my-team/{entry_id}/plan", dependencies=[Depends(my_team_plan_limiter.dependency)])
+def my_team_plan(entry_id: int = FastApiPath(..., ge=1, le=99_999_999),
+                 body: Optional[MyTeamPlanRequest] = None):
+    """The planner's best transfers for the team over the next gameweeks, like the ML manager's
+    plan (transfers, squad with roles and armband, projected points, reason). 503 without
+    projections or when the server is busy."""
+    from services import my_team
+    body = body or MyTeamPlanRequest()
+    return _my_team_call(my_team.plan_team, entry_id, free_transfers=body.free_transfers,
+                         max_hits=body.max_hits, horizon=body.horizon, chips=body.chips)
 
 
 pageview_limiter = RateLimiter(limits_from_env("PAGEVIEW_RATE_LIMITS", "60/60,600/3600"))

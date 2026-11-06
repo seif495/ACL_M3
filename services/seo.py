@@ -61,6 +61,8 @@ PAGES: Dict[str, Tuple[Optional[str], str]] = {
     "/table": ("Premier League table", "The 2026-27 Premier League table calculated from every finished match: "
                                        "points, goal difference, form and next fixture."),
     "/teams": ("Clubs", "Every Premier League club this season: position, form, results, fixtures, squad and news."),
+    "/my-team": ("My team", "Import your FPL team by its ID: see our model’s suggested XI, your squad’s predicted "
+                            "points and the best transfers to make."),
     "/team-of-the-week": ("Team of the Week", "The highest-scoring FPL squad our model predicts for the next "
                                               "gameweek (£100m, 3 per club), how its past picks scored, each "
                                               "week's dream team, and a season-long team the model manages."),

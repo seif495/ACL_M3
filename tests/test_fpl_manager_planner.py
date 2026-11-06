@@ -133,8 +133,8 @@ def test_a_solve_that_stops_at_its_time_limit_is_reported(monkeypatch):
     assert plan({**SQUAD, **MARKET}, chips=ALL_CHIPS)["optimal"] is True
     solve = planner.solve_plan
 
-    def capped(pool, bank, free_transfers, rules, chip, time_limit):
-        sol = solve(pool, bank, free_transfers, rules, chip, time_limit)
+    def capped(pool, bank, free_transfers, rules, chip, time_limit, max_hits=planner.MAX_HITS_PER_GW):
+        sol = solve(pool, bank, free_transfers, rules, chip, time_limit, max_hits)
         return dataclasses.replace(sol, optimal=False) if chip is None else sol
 
     monkeypatch.setattr(planner, "solve_plan", capped)
@@ -190,6 +190,16 @@ def test_a_hit_only_when_it_pays():
     captain = next(p for p in xi if p["captain"])
     assert big["projected_points"] == pytest.approx(sum(p["predicted_points"] for p in xi)
                                                     + captain["predicted_points"] - 4)
+
+
+def test_max_hits_zero_keeps_to_the_free_transfers():
+    # The same two big upgrades as above, but no hits allowed (My team's "free transfers only"):
+    # the better one takes the free transfer and nothing is paid for
+    big = {**SQUAD, **MARKET, 120: ("MID", "A", 45, 9.0), 141: ("FWD", "B", 45, 9.0)}
+    entry = plan(big, max_hits=0)
+    check_entry(entry)
+    assert len(entry["transfers"]) == 1 and entry["hits"] == 0 and entry["hit_cost"] == 0
+    assert all(row["hits"] == 0 for row in entry["horizon"])
 
 
 def test_margins_hold_back_transfers_and_hits(monkeypatch):

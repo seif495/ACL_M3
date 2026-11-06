@@ -16,6 +16,7 @@ const loadSettings = () => import('./pages/Settings').then((m) => ({ default: m.
 const loadHome = () => import('./pages/Home').then((m) => ({ default: m.Home }));
 const loadFixtures = () => import('./pages/Fixtures').then((m) => ({ default: m.Fixtures }));
 const loadLeagueTable = () => import('./pages/LeagueTable').then((m) => ({ default: m.LeagueTable }));
+const loadMyTeam = () => import('./pages/MyTeam').then((m) => ({ default: m.MyTeam }));
 const loadTeamOfTheWeek = () => import('./pages/TeamOfTheWeek').then((m) => ({ default: m.TeamOfTheWeek }));
 const loadModelInsights = () => import('./pages/ModelInsights').then((m) => ({ default: m.ModelInsights }));
 const loadPrivacy = () => import('./pages/Privacy').then((m) => ({ default: m.Privacy }));
@@ -37,6 +38,7 @@ const Home = lazy(loadHome);
 const Fixtures = lazy(loadFixtures);
 const LeagueTable = lazy(loadLeagueTable);
 const TeamOfTheWeek = lazy(loadTeamOfTheWeek);
+const MyTeam = lazy(loadMyTeam);
 const ModelInsights = lazy(loadModelInsights);
 const Privacy = lazy(loadPrivacy);
 const Terms = lazy(loadTerms);
@@ -72,7 +74,7 @@ function App() {
   // Warm the remaining route chunks once the browser is idle so later navigation is instant.
   useEffect(() => {
     const preload = () => {
-      [loadHome, loadFixtures, loadLeagueTable, loadTeams, loadTeamPage, loadMatchPage, loadTeamOfTheWeek, loadQAAssistant, loadPredictions, loadModelInsights, loadPlayerSearch, loadPlayerComparison, loadTrivia, loadSettings].forEach((load) => {
+      [loadHome, loadFixtures, loadLeagueTable, loadTeams, loadTeamPage, loadMatchPage, loadMyTeam, loadTeamOfTheWeek, loadQAAssistant, loadPredictions, loadModelInsights, loadPlayerSearch, loadPlayerComparison, loadTrivia, loadSettings].forEach((load) => {
         void load().catch(() => undefined);
       });
     };
@@ -101,6 +103,7 @@ function App() {
             <Route path="teams" element={<Page><Teams /></Page>} />
             <Route path="teams/:slug" element={<Page><TeamPage /></Page>} />
             <Route path="matches/:id" element={<Page><MatchPage /></Page>} />
+            <Route path="my-team" element={<Page><MyTeam /></Page>} />
             <Route path="team-of-the-week" element={<Page><TeamOfTheWeek /></Page>} />
             <Route path="assistant" element={<Page><QAAssistant /></Page>} />
             <Route path="players" element={<Page><PlayerSearch /></Page>} />

@@ -33,6 +33,7 @@ const SITEMAP_ROUTES: { path: string; changefreq: 'daily' | 'weekly' | 'monthly'
   { path: '/table', changefreq: 'daily', priority: 0.9 },
   { path: '/teams', changefreq: 'daily', priority: 0.8 },
   { path: '/predictions', changefreq: 'daily', priority: 0.9 },
+  { path: '/my-team', changefreq: 'weekly', priority: 0.7 },
   { path: '/team-of-the-week', changefreq: 'daily', priority: 0.8 },
   { path: '/players', changefreq: 'daily', priority: 0.8 },
   { path: '/assistant', changefreq: 'weekly', priority: 0.7 },

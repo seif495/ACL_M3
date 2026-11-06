@@ -25,7 +25,7 @@
 		method GET HEAD
 		header_regexp User-Agent (?i)(facebookexternalhit|facebot|twitterbot|whatsapp|slackbot|slack-imgproxy|discordbot|linkedinbot|telegrambot|skypeuripreview|microsoftpreview|pinterestbot|pinterest/0|redditbot|vkshare|embedly|iframely|mastodon|cardyb)
 	}
-	rewrite @preview /api/seo/preview?path={http.request.uri.path_escaped}
+	rewrite @preview /api/seo/preview?path={http.request.uri.path}
 
 	# Club and match pages of the current season, listed by the backend. The build's
 	# sitemap.xml is an index of this and sitemap-pages.xml (vite.config.ts).

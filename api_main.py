@@ -45,6 +45,7 @@ from graph.queries import CypherQueries, QueryExecutor
 from graph.data_loader import FPLDataLoader
 from preprocessing.intent_classifier import IntentClassifier, Intent, is_team_squad_question
 from services import fixture_picks
+from services import player_outlook, transfer_advice
 from preprocessing.entity_extractor import EntityExtractor
 # LAZY IMPORT: EmbeddingManager only when needed to avoid transformer/Keras dependency
 # from embeddings.embedding_manager import EmbeddingManager
@@ -494,7 +495,9 @@ def _filter_predictions(df, position: Optional[str], team: Optional[str], max_pr
     if q and q.strip():
         from utils.text import normalize_name
         wanted = normalize_name(q)
-        df = df[df['name'].astype(str).map(lambda n: wanted in normalize_name(n))]
+        # The full name or FPL's short name, since the table shows the short one ("Bruno G.")
+        df = df[df['name'].astype(str).map(
+            lambda n: wanted in normalize_name(n) or wanted in normalize_name(_web_name(n) or ""))]
     return df
 
 
@@ -534,6 +537,7 @@ async def get_top_performers_csv(position: Optional[str] = None, limit: int = Qu
             
             predictions.append({
                 "player_name": row['name'],
+                "web_name": _web_name(row['name']),
                 "predicted_points": round(float(row['predicted_points']), 2),
                 "team_name": row['team'],
                 "position": row['position'],
@@ -597,6 +601,7 @@ async def get_best_value_csv(position: Optional[str] = None, limit: int = Query(
             
             predictions.append({
                 "player_name": row['name'],
+                "web_name": _web_name(row['name']),
                 "predicted_points": round(float(row['predicted_points']), 2),
                 "team_name": row['team'],
                 "position": row['position'],
@@ -717,6 +722,15 @@ async def run_db(conn, query: str, params: Optional[Dict[str, Any]] = None) -> L
 _STATUS_LABELS = {"d": "doubtful", "i": "injured", "s": "suspended", "u": "unavailable", "n": "not in squad"}
 
 
+def _web_name(name: Any) -> Optional[str]:
+    """FPL's display name for a current player ("Evanilson" for "Francisco Evanilson de Lima
+    Barbosa") from the status file, or None. Display only: lookups keep the full name."""
+    try:
+        return season_service.status_lookup()["web_name"].get(str(name))
+    except Exception:  # a missing or unreadable status file only drops the short name
+        return None
+
+
 def _availability_fields(row) -> Dict[str, Any]:
     """status / chance_of_playing_next_round / news from a predictions row, JSON-safe."""
     def clean(value):
@@ -763,6 +777,23 @@ def _top_predictions_context(df, n: int = 5) -> str:
         lines.append("Highest-ranked in this list by position: "
                      + "; ".join(f"{pos} #{rank} {name} ({points:.1f} pts)" for pos, (rank, name, points) in picks))
     return "\n".join(lines) + "\n"
+
+
+def _forecast_context(conn, names: List[str]) -> Optional[str]:
+    """Every named player's forecast, price, fixtures and season so far, for a question that
+    weighs them over the coming gameweek (services/player_outlook.py). None without a
+    predictions file, so the single-player path's model fallback can answer. Blocking."""
+    df = get_predictions_df()
+    if df is None:
+        return None
+    outlooks = player_outlook.load_outlooks(conn, names, df)
+    return player_outlook.forecast_context([outlooks[name] for name in names])
+
+
+def _transfer_context(conn, transfer: "transfer_advice.TransferQuestion") -> str:
+    """The Transfer Analysis for a transfer question (services/transfer_advice.py). Blocking."""
+    outlooks = player_outlook.load_outlooks(conn, transfer.players, get_predictions_df())
+    return transfer_advice.context(transfer, outlooks)
 
 
 def get_player_index(conn=None) -> PlayerIndex:
@@ -1134,6 +1165,7 @@ class ModelReviewResponse(BaseModel):
 
 class PlayerLeader(BaseModel):
     name: str
+    web_name: Optional[str] = None  # FPL's display name, for current players; lookups use `name`
     team: Optional[str] = None
     position: Optional[str] = None
     games: int
@@ -1195,6 +1227,11 @@ def get_neo4j_conn():
     if not app_state["neo4j_conn"]:
         raise HTTPException(status_code=503, detail="Neo4j not connected")
     return app_state["neo4j_conn"]
+
+
+# Link previews for social apps' crawlers and the club/match sitemap (Caddy sends them here)
+from services import seo  # noqa: E402
+seo.register(app, get_neo4j_conn)
 
 
 def run_embedding_build(model_key: str, conn: Neo4jConnection) -> None:
@@ -1654,6 +1691,33 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
             params.setdefault("season", CURRENT_SEASON)
             params.setdefault("limit", 40)
 
+        # "Should I sell Haaland for Isak and Palmer for Rice?": the moves in the order asked,
+        # answered from this season and the forecasts (services/transfer_advice.py), no Cypher
+        transfer = None
+        if not (squad or per_fixture):
+            mentions = await asyncio.to_thread(entity_extractor.player_mention_spans, request.question)
+            named = {name for _start, _end, name in mentions}
+            transfer = transfer_advice.parse(request.question, mentions,
+                                             pronoun_players=[p for p in entities.players if p not in named])
+        if transfer is not None:
+            intent_result.intent = Intent.TRANSFER_ADVICE
+            entities.players = transfer.players
+            params.update(season=CURRENT_SEASON, transfer_moves=[[m.sell, m.buy] for m in transfer.moves])
+
+        # Several players weighed over the coming gameweek ("Is he a better captain than
+        # Haaland this week?"): every one's forecast goes to the LLM, and they're compared on
+        # this season (a comparison card with the predictions first)
+        forecast = (transfer is None and not per_fixture and len(entities.players) >= 2
+                    and intent_result.intent != Intent.TEAM_OF_THE_WEEK
+                    and (intent_result.intent == Intent.PREDICTION
+                         or player_outlook.is_next_gameweek_question(request.question)))
+        if forecast:
+            params["forecast"] = True
+            params.setdefault("season", await asyncio.to_thread(get_latest_season, conn))
+            if intent_result.intent in (Intent.PLAYER_STATS, Intent.PLAYER_SEARCH, Intent.GENERAL_QUESTION,
+                                        Intent.UNKNOWN, Intent.RECOMMENDATION):
+                intent_result.intent = Intent.PLAYER_COMPARISON
+
         # Step 4: Execute Cypher query
         query_executor = QueryExecutor(conn)
         cypher_context = ""
@@ -1749,9 +1813,15 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
             per = fixture_picks.requested_count(request.question)
             ml_context = fixture_picks.context(
                 fixture_picks.top_by_fixture(predictions_df.to_dict("records"), per), per)
-        elif intent_result.intent == Intent.PREDICTION:
+        elif transfer is not None:
+            ml_context = await asyncio.to_thread(_transfer_context, conn, transfer)
+            cypher_context = "Not used for transfer questions: the Transfer Analysis below has this season's numbers."
+        elif forecast:
+            ml_context = await asyncio.to_thread(_forecast_context, conn, entities.players)
+        if ml_context is None and intent_result.intent == Intent.PREDICTION:
             ml_integration = app_state.get("ml_integration")
-            if ml_integration and ml_integration.predictor_loaded:
+            # The predictions file needs no model in memory; the legacy stack is only its fallback
+            if get_predictions_df() is not None or (ml_integration and ml_integration.predictor_loaded):
                 try:
                     # If a player was extracted, get single player prediction
                     if entities.players:
@@ -1818,7 +1888,9 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
         embedding_context = ""
         embedding_used = False
         
-        if request.retrieval_method in ["Embeddings", "Hybrid"]:
+        # A transfer answer rests on this season and the forecasts; similar players (often from
+        # earlier seasons) only invited career numbers into it
+        if request.retrieval_method in ["Embeddings", "Hybrid"] and transfer is None:
             current_manager = app_state["embedding_manager"]
             if not current_manager:
                 # No manager yet — create a lazy one with prebuilt
@@ -1881,11 +1953,13 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
                 question=request.question,
                 kg_context=cypher_context,
                 embedding_context=embedding_context if embedding_context else None,
-                ml_context=ml_context,
+                # A transfer question's analysis has its own section and answering rules
+                ml_context=None if transfer is not None else ml_context,
                 data_scope=data_scope,
                 is_first_message=request.is_first_message,
                 chat_history=request.chat_history,
-                model_key=request.model  # Pass model key for model-specific prompting
+                model_key=request.model,  # Pass model key for model-specific prompting
+                transfer_context=ml_context if transfer is not None else None,
             )
 
         return PreparedAnswer(

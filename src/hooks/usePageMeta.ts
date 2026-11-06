@@ -24,8 +24,9 @@ function setMeta(selector: string, attr: 'name' | 'property', key: string, conte
 /**
  * Per-page <title>, meta description, Open Graph title/description/url and canonical link.
  *
- * Search engines render the SPA and read these; social scrapers don't run JS, so index.html
- * keeps site-level defaults for link previews.
+ * Search engines render the SPA and read these. Social apps' preview crawlers don't run JS, so
+ * Caddy sends them to the backend, which serves the same title and description per page
+ * (services/seo.py's PAGES; tests/test_seo.py fails if the two drift apart).
  */
 export function usePageMeta({ title, description, noindex = false }: PageMeta) {
   useEffect(() => {

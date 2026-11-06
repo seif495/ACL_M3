@@ -22,9 +22,11 @@ export function toSiteUrl(raw: string | undefined): string {
   return DEFAULT_SITE_URL;
 }
 
-// Indexable routes for sitemap.xml. Keep in sync with the routes in src/App.tsx and the route
-// list in deploy/Caddyfile. Left out on purpose: /settings (per-browser preferences), /design
-// (internal reference page), and the /qa and /search redirects.
+// Indexable fixed routes for sitemap-pages.xml. Keep in sync with the routes in src/App.tsx and
+// the page_routes snippet in deploy/Caddyfile. Left out on purpose: /settings (per-browser
+// preferences), /design (internal reference page), /stats (private), and the /qa and /search
+// redirects. Club and match pages are in /sitemap-data.xml, which Caddy serves from the backend
+// (services/seo.py) because they change with the season's data.
 const SITEMAP_ROUTES: { path: string; changefreq: 'daily' | 'weekly' | 'monthly'; priority: number }[] = [
   { path: '/', changefreq: 'daily', priority: 1.0 },
   { path: '/fixtures', changefreq: 'daily', priority: 0.9 },
@@ -56,7 +58,20 @@ function robotsTxt(siteUrl: string): string {
   ].join('\n');
 }
 
-function sitemapXml(siteUrl: string): string {
+// sitemap.xml is an index of these (robots.txt points at it)
+const SITEMAPS = ['/sitemap-pages.xml', '/sitemap-data.xml'];
+
+function sitemapIndexXml(siteUrl: string): string {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ...SITEMAPS.map((path) => `  <sitemap>\n    <loc>${siteUrl}${path}</loc>\n  </sitemap>`),
+    '</sitemapindex>',
+    '',
+  ].join('\n');
+}
+
+function sitemapPagesXml(siteUrl: string): string {
   const urls = SITEMAP_ROUTES.map(
     ({ path, changefreq, priority }) =>
       `  <url>\n    <loc>${siteUrl}${path}</loc>\n    <changefreq>${changefreq}</changefreq>\n    <priority>${priority.toFixed(1)}</priority>\n  </url>`,
@@ -70,7 +85,10 @@ function sitemapXml(siteUrl: string): string {
   ].join('\n');
 }
 
-/** Fills `%SITE_URL%` in index.html and emits robots.txt and sitemap.xml into the build. */
+/**
+ * Fills `%SITE_URL%` in index.html and emits robots.txt, sitemap.xml (an index) and
+ * sitemap-pages.xml into the build.
+ */
 function siteEssentials(siteUrl: string): Plugin {
   return {
     name: 'pitchme-site-essentials',
@@ -80,7 +98,8 @@ function siteEssentials(siteUrl: string): Plugin {
     },
     generateBundle() {
       this.emitFile({ type: 'asset', fileName: 'robots.txt', source: robotsTxt(siteUrl) });
-      this.emitFile({ type: 'asset', fileName: 'sitemap.xml', source: sitemapXml(siteUrl) });
+      this.emitFile({ type: 'asset', fileName: 'sitemap.xml', source: sitemapIndexXml(siteUrl) });
+      this.emitFile({ type: 'asset', fileName: 'sitemap-pages.xml', source: sitemapPagesXml(siteUrl) });
     },
   };
 }

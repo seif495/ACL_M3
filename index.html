@@ -6,7 +6,8 @@
     <title>Pitch Me: Fantasy Premier League stats, predictions and AI assistant</title>
     <meta name="description" content="Fantasy Premier League fixtures, table, player stats and next-gameweek points predictions, plus an AI assistant that answers your FPL questions." />
     <!-- Pages update the title, description and canonical URL at runtime; these are the
-         site-wide defaults that crawlers and link previews (which don't run JS) see.
+         site-wide defaults. Social apps' link-preview crawlers don't run JS, so Caddy sends them
+         to the backend, which answers each page's own tags (services/seo.py).
          The SITE_URL placeholders are filled in by vite.config.ts. -->
     <link rel="canonical" href="%SITE_URL%/" />
 

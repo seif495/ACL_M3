@@ -20,16 +20,12 @@ import {
 import { PlayerCombobox, type PlayerSuggestion } from '../components/compare/PlayerCombobox';
 import { ComparisonResults, type PlayerStats } from '../components/compare/ComparisonResults';
 import { usePageMeta } from '../hooks/usePageMeta';
+import { useExamplePlayers } from '../hooks/useExamplePlayers';
 
 const SEARCH_DEBOUNCE_MS = 200;
 
 const SEASONS = ['', '2020-21', '2021-22', '2022-23', '2023-24', '2024-25', '2025-26', '2026-27'];
 
-const EXAMPLE_PAIRS = [
-  { p1: 'Mohamed Salah', p2: 'Son Heung-min' },
-  { p1: 'Erling Haaland', p2: 'Harry Kane' },
-  { p1: 'Kevin De Bruyne', p2: 'Bruno Fernandes' },
-];
 
 type Suggestion = PlayerSuggestion;
 type CompareRouteState = {
@@ -60,6 +56,7 @@ function ResultsSkeleton() {
 export function PlayerComparison() {
   usePageMeta({ title: "Compare players", description: "Compare two FPL players head to head across any season: points, goals, assists, bonus, form and more." });
   const { neo4jConnected } = useAppStore();
+  const examplePairs = useExamplePlayers(neo4jConnected).pairs;
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -450,21 +447,21 @@ export function PlayerComparison() {
             </div>
           </form>
 
-          {comparisonData.length === 0 && neo4jConnected && (
+          {comparisonData.length === 0 && neo4jConnected && examplePairs.length > 0 && (
             <div className="mt-4 border-t border-line pt-4">
               <p className="text-micro font-semibold uppercase text-fg-subtle" id="example-matchups">
                 Try a matchup
               </p>
               <ul className="mt-2 flex flex-wrap gap-2" aria-labelledby="example-matchups">
-                {EXAMPLE_PAIRS.map((pair) => (
-                  <li key={pair.p1}>
+                {examplePairs.map(({ p1, p2 }) => (
+                  <li key={p1.name}>
                     <button
                       type="button"
-                      onClick={() => handleExample(pair.p1, pair.p2)}
-                      aria-label={`Compare ${pair.p1} vs ${pair.p2}`}
+                      onClick={() => handleExample(p1.name, p2.name)}
+                      aria-label={`Compare ${p1.name} vs ${p2.name}`}
                       className="rounded-full border border-line-strong px-3 py-1 text-data text-fg-muted transition-colors hover:border-accent hover:text-fg"
                     >
-                      {pair.p1} <span className="text-fg-subtle">vs</span> {pair.p2}
+                      {p1.label} <span className="text-fg-subtle">vs</span> {p2.label}
                     </button>
                   </li>
                 ))}

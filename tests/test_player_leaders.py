@@ -170,6 +170,20 @@ def test_get_player_leaders_cached_per_params():
     assert conn.execute_query.call_count == 3
 
 
+def test_get_player_leaders_adds_fpl_short_name():
+    """FPL's short name comes along for display; `name` stays the full name lookups key on."""
+    conn = mock_conn([raw_row(), raw_row(name="Francisco Evanilson de Lima Barbosa")])
+    lookup = {"web_name": {"Francisco Evanilson de Lima Barbosa": "Evanilson"}, "code": {}}
+    with patch.object(ss, "status_lookup", return_value=lookup):
+        players = ss.get_player_leaders(conn, CURRENT_SEASON)["players"]
+    assert [(p["name"], p["web_name"]) for p in players] == [
+        ("Mohamed Salah", None), ("Francisco Evanilson de Lima Barbosa", "Evanilson")]
+    # the cached rows themselves are not changed
+    with patch.object(ss, "status_lookup", return_value={"web_name": {}, "code": {}}):
+        again = ss.get_player_leaders(conn, CURRENT_SEASON)["players"]
+    assert [p["web_name"] for p in again] == [None, None] and conn.execute_query.call_count == 1
+
+
 def test_get_player_leaders_unknown_season():
     with pytest.raises(ss.NotFoundError):
         ss.get_player_leaders(mock_conn(), "1999-00")
@@ -201,7 +215,7 @@ def test_route_defaults(client, conn):
     player = body["players"][0]
     assert player["points_per_game"] == 8.3
     assert player["photo"] == api_main.FPL_PHOTO_URL.format(code=118748)   # fpl_code fallback
-    assert set(player) == {"name", "team", "position", "games", "minutes", "goals", "assists",
+    assert set(player) == {"name", "web_name", "team", "position", "games", "minutes", "goals", "assists",
                            "clean_sheets", "bonus", "total_points", "points_per_game", "price", "status",
                            "chance_of_playing_next_round", "news", "photo"}
 

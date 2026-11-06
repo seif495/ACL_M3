@@ -7,6 +7,9 @@ import { setConsent, useConsent } from '../../lib/consent';
  * Asks once whether visits may add the browser's timezone and visitor flags (lib/visitor.ts) to the
  * cookie-free page-view counter, which counts views anonymously either way. The choice can be
  * changed later from the footer or the privacy page.
+ *
+ * Sticky, not fixed: it takes its own space at the end of the page column, so it never hides
+ * the bottom of a page or the assistant's question box (the chat page shrinks to make room).
  */
 export function ConsentBanner() {
   const consent = useConsent();
@@ -15,7 +18,7 @@ export function ConsentBanner() {
   return (
     <section
       aria-label="Privacy choices"
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-line bg-surface-2/95 shadow-pop backdrop-blur-sm"
+      className="sticky bottom-0 z-50 shrink-0 border-t border-line bg-surface-2/95 shadow-pop backdrop-blur-sm"
     >
       <div className="mx-auto flex w-full max-w-page flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:gap-6 sm:px-6">
         <BarChart3 className="hidden h-6 w-6 shrink-0 text-accent sm:block" aria-hidden="true" />

@@ -6,7 +6,7 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 
-from preprocessing.entity_extractor import EntityExtractor, _keyword_regex
+from preprocessing.entity_extractor import EntityExtractor, _keyword_regex, history_exchanges
 
 # Any club in the graph by name or nickname ("coventry city", "man utd", "spurs"), matched
 # like the entity extractor's teams: whole words, longest name first
@@ -46,6 +46,10 @@ class Intent(Enum):
 
     # Best XI: the predicted squad for the next gameweek, or a finished gameweek's dream team
     TEAM_OF_THE_WEEK = "team_of_the_week"
+
+    # "Should I sell Haaland for Isak?": set by the API when services/transfer_advice.py finds
+    # transfer wording and the players involved (no pattern here: it needs the players)
+    TRANSFER_ADVICE = "transfer_advice"
 
     # Trivia
     TRIVIA = "trivia"
@@ -391,37 +395,39 @@ class IntentClassifier:
             for slot in re.search(pattern, query_lower).groups()
         )
 
+    # Capitalised words that aren't player names (sentence openers, FPL words)
+    _NOT_NAMES = {
+        'premier', 'league', 'season', 'gameweek', 'week', 'top', 'best', 'most',
+        'points', 'goals', 'assists', 'player', 'team', 'stats', 'performance',
+        'who', 'what', 'when', 'where', 'how', 'which', 'the', 'and', 'for',
+        'with', 'from', 'this', 'that', 'would', 'should', 'could', 'like', 'tell', 'show',
+        'give', 'compare', 'will', 'does', 'have', 'were', 'next', 'upcoming', 'forecast',
+        'predict', 'based', 'yes', 'sure', 'also', 'erling', 'mohamed', 'harry', 'son',
+    }
+
     def _extract_players_from_history(self, chat_history: List[Dict[str, str]]) -> List[str]:
-        """
-        Extract player names from recent chat history.
-        
-        Args:
-            chat_history: Conversation history
-            
-        Returns:
-            List of player names found in recent messages
-        """
-        players = []
-        # Check last 3 messages for player names
-        recent_messages = chat_history[-3:] if len(chat_history) >= 3 else chat_history
-        
-        # Common player name patterns (capitalized words that aren't common words)
-        common_words = {
-            'premier', 'league', 'season', 'gameweek', 'week', 'top', 'best', 'most',
-            'points', 'goals', 'assists', 'player', 'team', 'stats', 'performance',
-            'who', 'what', 'when', 'where', 'how', 'which', 'the', 'and', 'for',
-            'with', 'from', 'this', 'that', 'erling', 'mohamed', 'harry', 'son'
-        }
-        
-        for msg in recent_messages:
-            content = msg.get('content', '')
-            # Look for capitalized words (likely names)
-            words = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', content)
-            for word in words:
-                if word.lower() not in common_words and len(word) > 3:
-                    players.append(word)
-        
-        return players[:1]  # Return most recent player mentioned
+        """The player a pronoun most likely refers to, by the entity extractor's rule
+        (EntityExtractor.resolve_pronouns): exchanges newest first, and within one the user's
+        own question before the assistant's answer, which also names rivals and alternatives.
+        There is no player index here, so a name is a capitalised word that isn't a club's."""
+        for question, answer in history_exchanges(chat_history):
+            names = self._capitalised_names(question) or self._capitalised_names(answer)
+            if names:
+                return names[:1]
+        return []
+
+    @classmethod
+    def _capitalised_names(cls, text: str) -> List[str]:
+        clubs = EntityExtractor.find_team_spans(text)
+        names = []
+        for match in re.finditer(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', text or ""):
+            word = match.group()
+            if word.lower() in cls._NOT_NAMES or len(word) <= 3:
+                continue
+            if any(start < match.end() and match.start() < end for start, end, _ in clubs):
+                continue
+            names.append(word)
+        return names
     
     def get_query_type_for_intent(self, intent: Intent) -> str:
         """
@@ -454,6 +460,7 @@ class IntentClassifier:
             Intent.TRIVIA: "get_highest_single_gameweek_score", # Default trivia
             Intent.PREDICTION: None,  # ML predictions handled separately in api_main.py, not via Cypher
             Intent.TEAM_OF_THE_WEEK: None,  # services/season_service.get_team_of_the_week, in api_main.py
+            Intent.TRANSFER_ADVICE: None,  # services/transfer_advice.py, in api_main.py
         }
         
         return intent_to_query.get(intent, "")
@@ -478,6 +485,7 @@ class IntentClassifier:
             Intent.MOST_SELECTED: "Find most selected players",
             Intent.PREDICTION: "Get ML model predictions for future gameweeks",
             Intent.TEAM_OF_THE_WEEK: "Pick the best XI: predicted for the next gameweek, or a past gameweek's dream team",
+            Intent.TRANSFER_ADVICE: "Weigh transfers (sell X for Y) on predicted points, price and fixtures",
             Intent.TRIVIA: "Play FPL trivia",
             Intent.RECOMMENDATION: "Get player recommendations",
             Intent.SEASON_SUMMARY: "Get season overview and statistics",

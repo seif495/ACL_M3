@@ -2976,11 +2976,11 @@ def _live_points():
 
 
 @app.get("/api/ml-manager")
-def ml_manager_endpoint():
-    """The season-long team the points model manages under FPL's rules from GW9 on: the
-    current (planned, locked or scored) gameweek, chips, history and season totals, read
-    from $LIVE_DATA_DIR/ml_manager (logic in services/fpl_manager.py). 404 until the
-    manager exists."""
+def ml_manager_endpoint(gameweek: Optional[int] = Query(None, ge=1, le=38)):
+    """The season-long team the points model manages under FPL's rules from GW9 on: one
+    gameweek (by default the one being played, else the latest plan or result), chips, history
+    and season totals, read from $LIVE_DATA_DIR/ml_manager (logic in services/fpl_manager.py).
+    404 until the manager exists, and for a gameweek it has no team for."""
     import importlib
 
     # Imported per call (sys.modules makes that cheap), so the app still starts without it.
@@ -2991,7 +2991,8 @@ def ml_manager_endpoint():
         raise HTTPException(status_code=503, detail="The ML manager isn't available")
     not_found = (season_service.NotFoundError, getattr(fpl_manager, "NotFoundError", season_service.NotFoundError))
     try:
-        return fpl_manager.get_manager_view(photo_for=_photo_for, live=_live_points())
+        kwargs = {"gameweek": gameweek} if gameweek is not None else {}
+        return fpl_manager.get_manager_view(photo_for=_photo_for, live=_live_points(), **kwargs)
     except not_found as exc:
         raise HTTPException(status_code=404, detail=str(exc) or "The ML manager hasn't started yet")
 

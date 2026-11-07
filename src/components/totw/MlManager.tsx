@@ -4,11 +4,13 @@ import {
   handleApiError,
   isNotFoundError,
   type MlManagerGameweek,
+  type MlManagerGameweekRef,
   type MlManagerHistoryRow,
   type MlManagerView,
 } from '../../services/api';
 import { cn } from '../../utils/cn';
 import {
+  Button,
   Card,
   Chip,
   Countdown,
@@ -19,6 +21,7 @@ import {
   PitchPlayer,
   PitchRow,
   SectionHeading,
+  Select,
   Skeleton,
   StatCard,
   type Column,
@@ -31,6 +34,7 @@ import { useExportPhoto } from '../share/exportPhoto';
 import { useExport } from '../share/exportContext';
 import { PointsChart } from './MlManagerChart';
 import { BenchCard, ChipsPanel, MovesCard } from './MlManagerPanels';
+import { MlManagerTable } from './MlManagerTable';
 import {
   CHIP_NAMES,
   captainMultiplier,
@@ -53,7 +57,8 @@ import {
 // that same gameweek. The backend plans, locks and scores each gameweek; this only lays it out.
 
 /** What the gameweek on show is: a plan that can still change, a locked team, or a scored one. */
-// live: locked, with a provisional result from FPL's live points while the gameweek is played.
+// live: locked, with a provisional result (FPL's live points, or the matches finished so far) until
+// the pipeline scores it.
 type Phase = 'planned' | 'locked' | 'live' | 'scored';
 const hasPoints = (phase: Phase) => phase === 'scored' || phase === 'live';
 
@@ -75,7 +80,21 @@ function PhotoMarker({ icon: Icon, label, tone }: { icon: LucideIcon; label: str
   );
 }
 
-function StatusBanner({ gw, phase, nextDeadline }: { gw: MlManagerGameweek; phase: Phase; nextDeadline: string | null }) {
+/** A button to the other gameweek worth seeing: the live one from a plan, the plan from a live one. */
+interface Jump {
+  gameweek: number;
+  label: string;
+  onClick: () => void;
+}
+
+interface StatusBannerProps {
+  gw: MlManagerGameweek;
+  phase: Phase;
+  nextDeadline: string | null;
+  jump?: Jump | null;
+}
+
+function StatusBanner({ gw, phase, nextDeadline, jump }: StatusBannerProps) {
   const deadline = formatDateTime(gw.deadline);
   const plannedAt = formatDateTime(gw.planned_at);
   let icon: ReactNode;
@@ -104,18 +123,30 @@ function StatusBanner({ gw, phase, nextDeadline }: { gw: MlManagerGameweek; phas
     const result = gw.result;
     const at = result?.live ? new Date(result.live.fetched_at) : null;
     icon = <Radio className="h-6 w-6" aria-hidden="true" />;
-    title = (
-      <>
-        GW{gw.gameweek} live: {result ? plural(result.points, 'point') : '–'} so far
-        <span className="font-normal text-fg-muted"> – the team locked at the deadline{deadline ? ` (${deadline})` : ''}</span>
-      </>
-    );
-    detail = `FPL's live points${at ? `, updated ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}` : ''} and every minute while matches are on. Bonus points appear once FPL adds them, auto-subs once a player's matches are over; the gameweek is scored for good when FPL finishes it.`;
-    side = (
-      <Chip tone="danger" className="shrink-0 self-start sm:self-center">
-        Live
-      </Chip>
-    );
+    if (result?.finished) {
+      title = (
+        <>
+          GW{gw.gameweek} finished: {plural(result.points, 'point')}
+          {result.gw_average != null && <span className="font-normal text-fg-muted"> against an average of {result.gw_average}</span>}
+        </>
+      );
+      detail = 'Every match is played. The score is final once FPL has added the last bonus points and checked the gameweek.';
+    } else {
+      title = (
+        <>
+          GW{gw.gameweek} live: {result ? plural(result.points, 'point') : '–'} so far
+          <span className="font-normal text-fg-muted"> – the team locked at the deadline{deadline ? ` (${deadline})` : ''}</span>
+        </>
+      );
+      detail = at
+        ? `FPL's live points, updated ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} and every minute while matches are on. Bonus points appear once FPL adds them, auto-subs once a player's matches are over; the gameweek is scored for good when FPL finishes it.`
+        : 'Points from the matches finished so far, updated every minute. Bonus points appear once FPL adds them, auto-subs once a player’s matches are over.';
+      side = (
+        <Chip tone="danger" className="shrink-0">
+          Live
+        </Chip>
+      );
+    }
   } else if (phase === 'locked') {
     icon = <Lock className="h-6 w-6" aria-hidden="true" />;
     title = (
@@ -149,7 +180,16 @@ function StatusBanner({ gw, phase, nextDeadline }: { gw: MlManagerGameweek; phas
           <p className="mt-0.5 text-data text-fg-muted">{detail}</p>
         </div>
       </div>
-      {side}
+      {(side || jump) && (
+        <div className="flex shrink-0 flex-wrap items-center gap-3 sm:flex-col sm:items-end">
+          {side}
+          {jump && (
+            <Button variant="secondary" size="sm" onClick={jump.onClick}>
+              {jump.label}
+            </Button>
+          )}
+        </div>
+      )}
     </Card>
   );
 }
@@ -309,7 +349,7 @@ function GameweekStats({ gw, phase, maxFreeTransfers, isStart }: { gw: MlManager
   );
 }
 
-function SeasonSummary({ view }: { view: MlManagerView }) {
+function SeasonSummary({ view, live }: { view: MlManagerView; live?: { gameweek: number; points: number } | null }) {
   const { totals, history } = view;
   const league = totals.league;
   const best = history.reduce<MlManagerHistoryRow | null>((b, r) => (b == null || r.points > b.points ? r : b), null);
@@ -321,7 +361,10 @@ function SeasonSummary({ view }: { view: MlManagerView }) {
       <StatCard
         label="Season points"
         value={scoredAny ? totals.points : '–'}
-        detail={scoredAny ? `${plural(totals.gameweeks, 'gameweek')} since GW${view.start_gameweek}` : `First points after GW${view.start_gameweek}`}
+        detail={
+          (scoredAny ? `${plural(totals.gameweeks, 'gameweek')} since GW${view.start_gameweek}` : `First points after GW${view.start_gameweek}`) +
+          (live ? ` · ${signed(live.points, 0)} so far in GW${live.gameweek}` : '')
+        }
         highlight
       />
       <StatCard
@@ -476,28 +519,64 @@ function LoadingState() {
   );
 }
 
+/** "Gameweek 10 · live", "Gameweek 11 · planned", "Gameweek 9 · 57 pts". */
+function gameweekOption(g: MlManagerGameweekRef): string {
+  if (g.status === 'scored') return `Gameweek ${g.gameweek} · ${g.points != null ? plural(g.points, 'pt') : 'scored'}`;
+  if (g.live) return `Gameweek ${g.gameweek} · live`;
+  return `Gameweek ${g.gameweek} · ${g.status === 'planned' ? 'planned' : 'locked'}`;
+}
+
 interface MlManagerProps {
   /** Undefined while the first load is in flight (skeletons show). */
   view?: MlManagerView;
-  /** The query's error, if any: a 404 means the manager hasn't started. */
+  /** The query's error, if any: a 404 means the manager hasn't started, or has no team that gameweek. */
   error?: unknown;
+  /** Gameweek asked for in the URL (none: the backend's default, the one being played). */
+  selectedGameweek?: number;
+  /** Shows the gameweek picker and the live/plan switch. */
+  onGameweekChange?: (gameweek: number) => void;
   onRetry?: () => void;
+  /** Back to the default gameweek; offered when the requested one has no team. */
+  onShowLatest?: () => void;
   /** A background refresh is in flight. */
   updating?: boolean;
 }
 
-/** The ML manager's season: this gameweek's team and moves, chips, points and rank. */
-export function MlManager({ view, error, onRetry, updating = false }: MlManagerProps) {
+/** The ML manager's season: a gameweek's team and moves (live while it's played), chips, points and rank. */
+export function MlManager({
+  view,
+  error,
+  selectedGameweek,
+  onGameweekChange,
+  onRetry,
+  onShowLatest,
+  updating = false,
+}: MlManagerProps) {
   const chipsHeadingId = useId();
   const seasonHeadingId = useId();
   const historyHeadingId = useId();
+  const tableHeadingId = useId();
+  const pickerId = useId();
   // A plan whose deadline has passed is final even before the next data update locks it.
   const [now] = useState(() => Date.now());
 
   if (error) {
     return (
       <Card>
-        {isNotFoundError(error) ? (
+        {isNotFoundError(error) && selectedGameweek ? (
+          <EmptyState
+            icon={<CalendarClock className="h-8 w-8" aria-hidden="true" />}
+            title={`No ML manager team for gameweek ${selectedGameweek}`}
+            description="The ML manager has played every gameweek since GW9, and plans the next one before its deadline."
+            action={
+              onShowLatest && (
+                <Button variant="secondary" size="sm" onClick={onShowLatest}>
+                  Show the current gameweek
+                </Button>
+              )
+            }
+          />
+        ) : isNotFoundError(error) ? (
           <EmptyState
             icon={<CalendarClock className="h-8 w-8" aria-hidden="true" />}
             title="The ML manager hasn’t started yet"
@@ -517,7 +596,7 @@ export function MlManager({ view, error, onRetry, updating = false }: MlManagerP
   const phase: Phase =
     gw.status === 'scored' && gw.result
       ? 'scored'
-      : gw.status !== 'scored' && gw.result?.live && deadlineMs <= now
+      : gw.status !== 'scored' && gw.result && deadlineMs <= now
         ? 'live'
       : gw.status === 'planned' && !(deadlineMs <= now)
         ? 'planned'
@@ -529,13 +608,52 @@ export function MlManager({ view, error, onRetry, updating = false }: MlManagerP
   const lineup = lineupOf(shown);
   const isStart = gw.gameweek === view.start_gameweek;
 
+  // The live gameweek and the next plan are the two worth jumping between.
+  const gameweeks = view.gameweeks ?? [];
+  const others = gameweeks.filter((g) => g.gameweek !== gw.gameweek);
+  const livePeer = [...others].reverse().find((g) => g.live);
+  const planPeer = others.find((g) => g.status === 'planned' && g.gameweek > gw.gameweek);
+  let jump: Jump | null = null;
+  if (onGameweekChange && phase === 'planned' && livePeer) {
+    const target = livePeer.gameweek;
+    jump = { gameweek: target, label: `GW${target} live points`, onClick: () => onGameweekChange(target) };
+  } else if (onGameweekChange && phase !== 'planned' && planPeer) {
+    const target = planPeer.gameweek;
+    jump = { gameweek: target, label: `See the GW${target} plan`, onClick: () => onGameweekChange(target) };
+  }
+  // While a gameweek is played its points aren't in the season total yet.
+  const liveSoFar =
+    phase === 'live' && gw.result && !view.history.some((h) => h.gameweek === gw.gameweek)
+      ? { gameweek: gw.gameweek, points: gw.result.points }
+      : null;
+
   return (
     <div aria-busy={updating} className="space-y-8">
       <h2 className="sr-only">
         ML manager, gameweek {gw.gameweek}: {phase === 'planned' ? 'planned team' : phase === 'locked' ? 'locked team' : phase === 'live' ? 'live points' : 'scored team'}
       </h2>
 
-      <StatusBanner gw={gw} phase={phase} nextDeadline={view.next_deadline} />
+      {onGameweekChange && gameweeks.length > 1 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <label htmlFor={pickerId} className="text-micro font-semibold uppercase text-fg-muted">
+            Gameweek
+          </label>
+          <Select
+            id={pickerId}
+            className="w-full min-w-0 sm:w-64"
+            value={gw.gameweek}
+            onChange={(e) => onGameweekChange(Number(e.target.value))}
+          >
+            {[...gameweeks].reverse().map((g) => (
+              <option key={g.gameweek} value={g.gameweek}>
+                {gameweekOption(g)}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+
+      <StatusBanner gw={gw} phase={phase} nextDeadline={view.next_deadline} jump={jump} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
         <div className="min-w-0">
@@ -586,6 +704,25 @@ export function MlManager({ view, error, onRetry, updating = false }: MlManagerP
         </aside>
       </div>
 
+      {hasPoints(phase) && (
+        <section aria-labelledby={tableHeadingId} className="min-w-0">
+          <SectionHeading
+            as="h2"
+            size="md"
+            id={tableHeadingId}
+            title={phase === 'live' && !gw.result?.finished ? 'Live: predicted vs actual' : 'Predicted vs actual'}
+            subtitle={`The XI after automatic substitutions, then the bench. The captain’s points and prediction are ${multiplierWord(captainMultiplier(gw))}${gw.chip === 'bboost' ? '; with Bench Boost the bench counts too' : '; bench points don’t count'}.`}
+          />
+          <MlManagerTable
+            gameweek={gw.gameweek}
+            lineup={lineup}
+            benchBoost={gw.chip === 'bboost'}
+            live={phase === 'live'}
+            updating={updating}
+          />
+        </section>
+      )}
+
       {view.chips.length > 0 && (
         <section aria-labelledby={chipsHeadingId}>
           <SectionHeading
@@ -608,7 +745,7 @@ export function MlManager({ view, error, onRetry, updating = false }: MlManagerP
           subtitle={`Every gameweek since GW${view.start_gameweek}, scored like any manager’s, hits included`}
           className="mb-0"
         />
-        <SeasonSummary view={view} />
+        <SeasonSummary view={view} live={liveSoFar} />
         <Card>
           <SectionHeading as="h3" title="Points per gameweek" subtitle="After hits, against the average manager’s score" />
           {view.history.length > 0 ? (

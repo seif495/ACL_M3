@@ -464,6 +464,15 @@ def season_entries():
     return [e9, e10, e11, e12]
 
 
+def playing_entries():
+    """GW9 and GW10 scored, GW11 locked and being played, GW12 already planned."""
+    e9, e10 = season_entries()[:2]
+    s = fm.apply_entry(fm.apply_entry(fm.new_state(SEASON), e9), e10)
+    e11 = lock(next_entry(s, 11, swaps={5: 11}))
+    e12 = next_entry(fm.apply_entry(s, e11), 12, swaps={6: 12})
+    return [e9, e10, e11, e12]
+
+
 class TestReplay(unittest.TestCase):
     def test_history_and_totals(self):
         state = fm.replay(season_entries())
@@ -658,6 +667,58 @@ class TestView(unittest.TestCase):
         self.assertEqual(scored[int(squad[0]["element"])]["points"], 7)
         # Before the deadline nobody asks FPL
         fm.get_manager_view(SEASON, now=before(12), live=lambda gw: self.fail("asked before the deadline"))
+
+    def write_meta(self, events):
+        with open(os.path.join(self.tmp.name, "meta.json"), "w", encoding="utf-8") as f:
+            json.dump({"season": SEASON, "next_deadline": deadline(12), "events": events}, f)
+
+    def test_the_gameweek_being_played_comes_first(self):
+        for e in playing_entries():
+            fm.save_entry(self.tmp.name, e, now=before(9))
+        self.write_meta([{"id": 11, "finished": False}])
+        now = after(11)
+        r = fm.get_manager_view(SEASON, now=now)
+        # GW11 is played while GW12 is already planned: the page opens on GW11
+        self.assertEqual((r["default_gameweek"], r["current"]["gameweek"], r["current"]["status"]), (11, 11, fm.LOCKED))
+        self.assertIsNone(r["current"]["result"])        # no live feed and no CSV rows yet: shown as locked
+        self.assertEqual([(g["gameweek"], g["status"], g["live"]) for g in r["gameweeks"]],
+                         [(9, fm.SCORED, False), (10, fm.SCORED, False), (11, fm.LOCKED, True), (12, fm.PLANNED, False)])
+        self.assertEqual([g["points"] for g in r["gameweeks"]], [h["points"] for h in r["history"]] + [None, None])
+
+        # FPL's live points give GW11 a provisional result on top of the scored total
+        squad = r["current"]["squad"]
+        first = int(squad[0]["element"])
+        feed = {"actual": {first: {"points": 9, "minutes": 90}}, "finished": [], "started": [],
+                "fetched_at": "2026-11-14T15:00:00+00:00"}
+        live = fm.get_manager_view(SEASON, now=now, live=lambda gw: feed if gw == 11 else None)
+        result = live["current"]["result"]
+        self.assertEqual(live["current"]["status"], fm.LOCKED)
+        self.assertTrue(result["provisional"])
+        self.assertEqual(result["live"], {"fetched_at": "2026-11-14T15:00:00+00:00"})
+        self.assertEqual(result["total"], r["totals"]["points"] + result["points"])
+        self.assertEqual({p["element"]: p["points"] for p in result["players"]}[first], 9)
+
+        # Without the feed, the season CSV's finished matches count
+        with open(os.path.join(self.tmp.name, "FPL_2026_2027.csv"), "w", encoding="utf-8") as f:
+            f.write(f"element,GW,minutes,total_points\n{first},11,90,6\n{first},10,90,2\n")
+        ss.clear_cache()
+        csv = fm.get_manager_view(SEASON, now=now)["current"]["result"]
+        self.assertIsNone(csv["live"])
+        self.assertEqual({p["element"]: p["points"] for p in csv["players"]}[first], 6)
+
+        # The next plan and past gameweeks on request; FPL isn't asked for them
+        never = lambda gw: self.fail(f"asked FPL for GW{gw}")
+        plan = fm.get_manager_view(SEASON, now=now, gameweek=12, live=never)
+        self.assertEqual((plan["current"]["gameweek"], plan["current"]["status"], plan["default_gameweek"]),
+                         (12, fm.PLANNED, 11))
+        past = fm.get_manager_view(SEASON, now=now, gameweek=10, live=never)
+        self.assertEqual(past["current"]["result"]["points"], r["history"][1]["points"])
+        with self.assertRaises(fm.NoEntryError):
+            fm.get_manager_view(SEASON, now=now, gameweek=8)
+        self.assertTrue(issubclass(fm.NoEntryError, ss.NotFoundError))     # the route's 404
+
+        # Past GW12's deadline the latest gameweek is the one being played
+        self.assertEqual(fm.get_manager_view(SEASON, now=after(12))["default_gameweek"], 12)
 
 
 if __name__ == "__main__":

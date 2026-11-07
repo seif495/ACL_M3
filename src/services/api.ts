@@ -931,9 +931,12 @@ export interface MlManagerSquadPlayer extends MlManagerPlayerRef {
 export interface MlManagerResultPlayer {
   element: number;
   name?: string;
-  /** Raw points this gameweek; null if unknown. */
+  /** Raw points this gameweek; null if unknown (while live: his matches haven't started). */
   points: number | null;
+  /** Minutes played so far; null while his matches are still to start. */
   minutes: number | null;
+  /** null while his matches are still to finish. */
+  played?: boolean | null;
   /** 0 for an uncounted bench player, 2 for the captain (3 with Triple Captain). */
   multiplier: number;
   counted: boolean;
@@ -978,6 +981,10 @@ export interface MlManagerResult {
   bench_points?: number;
   /** Set on a provisional result from FPL's live points while the gameweek is played. */
   live?: { fetched_at: string } | null;
+  /** A locked gameweek the pipeline hasn't scored yet: live points, or the finished matches so far. */
+  provisional?: boolean;
+  /** FPL has marked the gameweek finished (bonus may still be added until it checks the data). */
+  finished?: boolean;
 }
 
 /** One gameweek of the manager (a saved gwNN.json). */
@@ -1067,14 +1074,29 @@ export interface MlManagerTotals {
   league: MlManagerLeague | null;
 }
 
+/** One gameweek the manager has a team for (the page's picker). */
+export interface MlManagerGameweekRef {
+  gameweek: number;
+  /** As shown: a plan past its deadline is locked. */
+  status: MlManagerStatus;
+  /** Being played: deadline passed, FPL hasn't finished it. */
+  live: boolean;
+  /** Net points once scored. */
+  points: number | null;
+}
+
 export interface MlManagerView {
   season: string;
   start_gameweek: number;
   model: string;
   /** budget in tenths. */
   rules: { budget: number; max_free_transfers: number; hit_cost: number };
-  /** The latest gameweek: the plan for the next deadline, or the last locked/scored one. */
+  /** The gameweek asked for; by default the one being played, else the plan for the next deadline or the last scored one. */
   current: MlManagerGameweek;
+  /** Every gameweek with a team, oldest first (older backends leave it out). */
+  gameweeks?: MlManagerGameweekRef[];
+  /** The gameweek shown without one asked for. */
+  default_gameweek?: number;
   chips: MlManagerChipState[];
   /** Scored gameweeks, oldest first. */
   history: MlManagerHistoryRow[];
@@ -1637,9 +1659,14 @@ export const apiService = {
     return data;
   },
 
-  /** The ML manager's season: its current gameweek, chips, history and totals. 404 until it has started. */
-  async getMlManager(): Promise<MlManagerView> {
-    const { data } = await api.get<MlManagerView>('/api/ml-manager');
+  /**
+   * The ML manager's season: one gameweek (by default the one being played, else the latest plan
+   * or result), chips, history and totals. 404 until it has started, or for a gameweek it has no team for.
+   */
+  async getMlManager(gameweek?: number): Promise<MlManagerView> {
+    const { data } = await api.get<MlManagerView>('/api/ml-manager', {
+      params: gameweek ? { gameweek } : undefined,
+    });
     return data;
   },
 

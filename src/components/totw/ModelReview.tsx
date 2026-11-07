@@ -59,7 +59,7 @@ function multiplierText(points: number, multiplier: number) {
 }
 
 /** A dash for a missing number, with its meaning for screen readers. */
-function Missing({ label }: { label: string }) {
+export function Missing({ label }: { label: string }) {
   return (
     <>
       <span aria-hidden="true" className="text-fg-subtle">
@@ -79,7 +79,7 @@ interface SubMarkerProps {
 }
 
 /** Round auto-sub arrow: mint up for the sub who came on, pink down for the starter he replaced. */
-function SubMarker({ direction, label, large = false, decorative = false }: SubMarkerProps) {
+export function SubMarker({ direction, label, large = false, decorative = false }: SubMarkerProps) {
   const Icon = direction === 'in' ? ArrowUp : ArrowDown;
   return (
     <span
@@ -98,7 +98,7 @@ function SubMarker({ direction, label, large = false, decorative = false }: SubM
 }
 
 /** C/V armband next to a name in the lists, as picked. */
-function ArmbandTag({ player }: { player: ModelReviewPlayer }) {
+export function ArmbandTag({ player }: { player: { captain: boolean; vice_captain: boolean } }) {
   if (!player.captain && !player.vice_captain) return null;
   const label = player.captain ? 'Captain' : 'Vice-captain';
   return (

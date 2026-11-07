@@ -38,8 +38,8 @@ def fake_engine(view=None, error=None, own_not_found=True):
     module = types.ModuleType("services.fpl_manager")
     calls = []
 
-    def get_manager_view(season=None, photo_for=None, live=None):
-        calls.append({"season": season, "photo_for": photo_for})
+    def get_manager_view(season=None, photo_for=None, live=None, **kwargs):
+        calls.append({"season": season, "photo_for": photo_for, **kwargs})
         if error is not None:
             raise error
         return view
@@ -69,6 +69,17 @@ def test_returns_the_view(client, monkeypatch):
     assert resp.json() == VIEW
     # Photos come from the app's no-network helper.
     assert engine.calls[0]["photo_for"] is api_main._photo_for
+
+
+def test_passes_the_gameweek(client, monkeypatch):
+    engine = fake_engine(VIEW)
+    use_engine(monkeypatch, engine)
+    assert client.get("/api/ml-manager?gameweek=11").status_code == 200
+    assert engine.calls[0]["gameweek"] == 11
+    # without one, the engine picks (the gameweek being played, else the latest)
+    client.get("/api/ml-manager")
+    assert "gameweek" not in engine.calls[1]
+    assert client.get("/api/ml-manager?gameweek=0").status_code == 422
 
 
 def test_engine_not_found_is_404(client, monkeypatch):

@@ -214,3 +214,32 @@ def test_routes(live_dir):
     app2 = FastAPI()
     gp.register(app2, lambda: (_ for _ in ()).throw(RuntimeError("down")))
     assert TestClient(app2).get("/api/gameweek/8").status_code == 200
+
+
+def test_ml_manager_is_the_gameweeks_own_entry(live_dir, monkeypatch):
+    # While GW8 is played the ML manager's latest entry is already GW9's plan, so the page asks
+    # for GW8's entry by number.
+    from services import fpl_manager as fm
+    asked = []
+
+    def view(season, photo_for=None, live=None, now=None, gameweek=None):
+        asked.append(gameweek)
+        if gameweek != 8:
+            raise fm.NoEntryError(f"no team for GW{gameweek}")
+        result = {"points": 31, "gross": 31, "hit_cost": 0, "chip": None, "captain": "Saka", "total": 99,
+                  "live": {"fetched_at": "2026-10-24T17:59:00+00:00"}, "players": []}
+        return {"current": {"gameweek": 8, "status": "locked", "transfers": [], "result": result}, "history": []}
+
+    monkeypatch.setattr(fm, "get_manager_view", view)
+    page = gp.build_gameweek(8, FakeConn(fixture_rows(8, "scheduled")), None, lambda gw: feed(), now=NOW)
+    assert asked == [8]
+    assert (page["ml_manager"]["status"], page["ml_manager"]["points"], page["ml_manager"]["total"]) == ("locked", 31, 99)
+
+    meta = json.loads((live_dir / "meta.json").read_text(encoding="utf-8"))
+    meta["events"][0]["id"] = 7                      # a past gameweek before the manager started
+    (live_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    ss.clear_cache()
+    gp.clear_cache()
+    page = gp.build_gameweek(7, FakeConn(fixture_rows(7, "scheduled")), None, lambda gw: feed(), now=NOW)
+    assert page["ml_manager"] is None
+    assert "The ML manager didn't play this gameweek." in page["notes"]

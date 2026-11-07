@@ -137,9 +137,12 @@ export function TeamOfTheWeek() {
     retry: (failures, err) => !isNotFoundError(err) && failures < 1,
   });
 
+  // Without a gameweek the backend picks the one being played, else the latest plan or result.
+  const managerGw = view === 'manager' ? requestedGw : undefined;
   const manager = useQuery({
-    queryKey: ['ml-manager'],
-    queryFn: () => apiService.getMlManager(),
+    queryKey: ['ml-manager', managerGw ?? 'default'],
+    queryFn: () => apiService.getMlManager(managerGw),
+    placeholderData: keepPreviousData,
     staleTime: 5 * 60_000,
     enabled: view === 'manager',
     refetchInterval: (q) => {
@@ -147,13 +150,13 @@ export function TeamOfTheWeek() {
       const started = gw?.deadline ? Date.parse(gw.deadline) <= Date.now() : false;
       return gw && gw.status !== 'scored' && started ? LIVE_REFRESH_MS : false;
     },
-    // A 404 only means the manager hasn't started: show it at once rather than retrying.
+    // A 404 means the manager hasn't started, or has no team that gameweek: show it at once.
     retry: (failures, err) => !isNotFoundError(err) && failures < 1,
   });
 
-  // Keep the gw param out of the URL in predicted and manager modes (it only applies to past gameweeks).
+  // Keep the gw param out of the URL in predicted mode (it only applies to past gameweeks).
   useEffect(() => {
-    if ((view === 'predicted' || view === 'manager') && params.has('gw')) {
+    if (view === 'predicted' && params.has('gw')) {
       params.delete('gw');
       setParams(params, { replace: true });
     }
@@ -207,8 +210,14 @@ export function TeamOfTheWeek() {
           <MlManager
             view={manager.data}
             error={manager.isError ? manager.error : undefined}
+            selectedGameweek={managerGw}
             updating={manager.isFetching && !manager.isLoading}
+            // The default gameweek keeps a plain URL (and shares the default query).
+            onGameweekChange={(gw) =>
+              setParams(gw === manager.data?.default_gameweek ? { mode: 'manager' } : { mode: 'manager', gw: String(gw) })
+            }
             onRetry={() => manager.refetch()}
+            onShowLatest={managerGw ? () => setParams({ mode: 'manager' }) : undefined}
           />
         ) : view === 'review' ? (
           <ModelReview

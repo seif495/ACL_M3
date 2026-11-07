@@ -149,7 +149,8 @@ export function chipStatus(c: MlManagerChipState, gw: MlManagerGameweek): ChipSt
   const [first, last] = c.window;
   const inWindow = gw.gameweek >= first && gw.gameweek <= last;
   const usedIn = c.used_gameweek ?? (inWindow && gw.chip === c.chip ? gw.gameweek : null);
-  if (usedIn != null && gw.status === 'planned' && (c.planned || usedIn === gw.gameweek)) {
+  // A chip in the next gameweek's plan reads as planned from any gameweek on show (e.g. the live one).
+  if (usedIn != null && (c.planned || (gw.status === 'planned' && usedIn === gw.gameweek))) {
     return { phase: 'planned', text: `Planned for GW${usedIn}` };
   }
   if (usedIn === gw.gameweek) return { phase: 'played', text: `Played in GW${usedIn}` };

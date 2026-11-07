@@ -409,12 +409,15 @@ def build_gameweek(gameweek: int, conn: Optional[Conn], photo_for: Optional[ss.P
 
     try:
         from services import fpl_manager
-        view = fpl_manager.get_manager_view(season, photo_for=photo_for, live=live, now=now)
+        # This gameweek's entry: while it's played the latest entry is already the next plan.
+        view = fpl_manager.get_manager_view(season, photo_for=photo_for, live=live, now=now, gameweek=gameweek)
         payload["ml_manager"] = manager_summary(view, gameweek)
         if payload["ml_manager"] is None:
             notes.append("The ML manager didn't play this gameweek.")
-    except ss.NotFoundError:
-        notes.append("The ML manager hasn't started yet.")
+    except ss.NotFoundError as exc:
+        # (the import succeeded to get here) NoEntryError: it runs, but had no team this gameweek
+        notes.append("The ML manager didn't play this gameweek." if isinstance(exc, fpl_manager.NoEntryError)
+                     else "The ML manager hasn't started yet.")
     except Exception as exc:
         logger.warning("Gameweek page: ML manager failed: %s", exc)
         notes.append("The ML manager's score couldn't be read just now.")

@@ -38,7 +38,8 @@ Files, in $LIVE_DATA_DIR/ml_manager/<season>/:
 The manager starts in ML_MANAGER_START_GW (GW9 2026-27) with the v4 squad the pipeline saved
 before that deadline (model_picks/<season>/gw09.json, start_entry_from_pick). The plans come
 from services/fpl_manager_planner and the daily run is pipeline/ml_manager.
-get_manager_view builds the /api/ml-manager payload. Nothing here makes network calls.
+get_manager_view builds the /api/ml-manager payload (one gameweek at a time, by default the one
+being played). Nothing here makes network calls.
 """
 import copy
 import json
@@ -1021,16 +1022,76 @@ def _cached_entries(live: str, season: str) -> List[Dict[str, Any]]:
     return sorted(out, key=lambda e: int(e["gameweek"]))
 
 
+class NoEntryError(ss.NotFoundError):
+    """The manager is running but has no entry for the gameweek asked for."""
+
+
+def _status_at(entry: Dict[str, Any], now: Optional[datetime] = None) -> str:
+    """The entry's status as the page shows it: a plan past its deadline counts as locked."""
+    return lock_entry(entry, now)["status"]
+
+
+def _being_played(entry: Dict[str, Any], now: Optional[datetime] = None) -> bool:
+    """Its deadline has passed and the pipeline hasn't scored it yet."""
+    return _status_at(entry, now) == LOCKED and not entry.get("result")
+
+
+def default_gameweek(entries: List[Dict[str, Any]], now: Optional[datetime] = None) -> int:
+    """The gameweek the page opens on: the one being played (deadline passed, not scored yet),
+    even when the next one is already planned; else the latest entry."""
+    playing = [e for e in entries if _being_played(e, now)]
+    return int((playing or entries)[-1]["gameweek"])
+
+
+def gameweek_list(entries: List[Dict[str, Any]], season: str, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    """Every gameweek the manager has an entry for, for the page's picker: status as shown,
+    `live` while FPL plays it (deadline passed, not finished), and the points once scored."""
+    out = []
+    for e in entries:
+        gw = int(e["gameweek"])
+        status = _status_at(e, now)
+        result = e.get("result") or {}
+        out.append({"gameweek": gw, "status": status,
+                    "live": status == LOCKED and not result
+                    and lp.is_live(mr.event_info(gw, season), e.get("deadline"), now),
+                    "points": result.get("points") if status == SCORED else None})
+    return out
+
+
+def provisional_result(entry: Dict[str, Any], season: str, previous_total: int,
+                       live: Optional[Callable[[int], Optional[Dict[str, Any]]]] = None) -> Optional[Dict[str, Any]]:
+    """The `result` of a locked gameweek the pipeline hasn't scored yet: FPL's live points
+    (live_points.gameweek_live) over the season CSV's finished matches, scored like
+    score_entry. `live` says when FPL's feed was read (null when only the CSV had points),
+    `provisional` that the pipeline still scores it for good. None when neither has anything
+    (no feed and no CSV rows for the gameweek), so the page shows the team as locked."""
+    gw = int(entry["gameweek"])
+    feed = live(gw) if live is not None else None
+    csv_actual = mr.actual_by_element(gw, season)
+    if not feed and not csv_actual:
+        return None
+    finished = set(ss.read_meta(season).get("finished_fixtures") or []) | set((feed or {}).get("finished") or [])
+    result = score_entry(entry, lp.merge(csv_actual, feed), mr.event_info(gw, season), sorted(finished),
+                         previous_total=previous_total)
+    return {**result, "live": {"fetched_at": feed["fetched_at"]} if feed else None, "provisional": True}
+
+
 def get_manager_view(season: str = CURRENT_SEASON, photo_for: Optional[ss.PhotoFn] = None,
                      now: Optional[datetime] = None,
-                     live: Optional[Callable[[int], Optional[Dict[str, Any]]]] = None) -> Dict[str, Any]:
-    """The /api/ml-manager payload: the latest entry (the planned next gameweek, or the
-    last locked/scored one), chips, history and totals. NotFoundError until the first
-    entry exists. Players get a `photo` like the other team-of-the-week payloads.
+                     live: Optional[Callable[[int], Optional[Dict[str, Any]]]] = None,
+                     gameweek: Optional[int] = None) -> Dict[str, Any]:
+    """The /api/ml-manager payload: one gameweek's entry (`current`), chips, history, totals and
+    the list of gameweeks. NotFoundError until the first entry exists, and for a `gameweek` the
+    manager has no entry for. Players get a `photo` like the other team-of-the-week payloads.
 
-    With `live` (services.live_points.gameweek_live), a locked gameweek being played gets a
-    provisional `result` from FPL's live points (`result.live` says when they were fetched); the
-    entry stays locked, and the pipeline still scores it once FPL has checked the gameweek."""
+    Without `gameweek` it's default_gameweek: the gameweek being played while FPL plays it
+    (the next one's plan is in `gameweeks`), else the latest entry (the planned next gameweek,
+    or the last locked/scored one).
+
+    A locked gameweek the pipeline hasn't scored yet gets a provisional `result`
+    (provisional_result: with `live`, from FPL's live points, `result.live` saying when they
+    were fetched); the entry stays locked, and the pipeline scores it once FPL has checked
+    the gameweek."""
     live_dir = ss.live_dir()
     entries = _cached_entries(live_dir, season)
     if not entries:
@@ -1038,8 +1099,13 @@ def get_manager_view(season: str = CURRENT_SEASON, photo_for: Optional[ss.PhotoF
     rules = load_rules(live_dir, season)
     start = ML_MANAGER_START_GW if season == ML_MANAGER_SEASON else int(entries[0]["gameweek"])
     state = replay(entries, rules, season, start)
-    current = copy.deepcopy(entries[-1])
-    current = lock_entry(current, now)        # past its deadline it counts, even before the next run locks it
+    by_gw = {int(e["gameweek"]): e for e in entries}
+    default = default_gameweek(entries, now)
+    shown = default if gameweek is None else int(gameweek)
+    if shown not in by_gw:
+        raise NoEntryError(f"The ML manager has no team for gameweek {shown}")
+    current = lock_entry(copy.deepcopy(by_gw[shown]), now)   # past its deadline it counts, even before the next run locks it
+    latest = lock_entry(entries[-1], now)
 
     lookup = ss.status_lookup(season)
     for p in current.get("squad") or []:
@@ -1050,22 +1116,16 @@ def get_manager_view(season: str = CURRENT_SEASON, photo_for: Optional[ss.PhotoF
             side["web_name"] = side.get("web_name") or lookup["web_name"].get(side.get("name"))
             side["_code"] = lookup["code"].get(_int(side.get("element")))
     current["team_value"] = team_value(current.get("squad") or [])
-    if live is not None and current.get("status") == LOCKED and not current.get("result"):
-        gw = int(current["gameweek"])
-        event = mr.event_info(gw, season)
-        feed = live(gw) if lp.is_live(event, current.get("deadline"), now) else None
-        if feed:
-            actual = lp.merge(mr.actual_by_element(gw, season), feed)
-            finished = sorted(set(ss.read_meta(season).get("finished_fixtures") or []) | set(feed["finished"]))
-            result = score_entry(current, actual, event, finished, previous_total=int(state["totals"]["points"]))
-            current["result"] = {**result, "live": {"fetched_at": feed["fetched_at"]}}
-
+    if current.get("status") == LOCKED and not current.get("result") and deadline_passed(current, now):
+        before = sum(int(h["points"]) for h in state["history"] if int(h["gameweek"]) < shown)
+        current["result"] = provisional_result(current, season, before, live)
+    # The chips as of the latest entry (a chip planned for the next gameweek shows as planned).
     used = list(state["chips_used"])
-    if current.get("status") == PLANNED:
-        chip_gw = int(current["gameweek"])
-        if current.get("chip"):
-            window = chip_window(rules, current["chip"], chip_gw)
-            used.append({"chip": current["chip"], "gameweek": chip_gw, "half": window.half if window else None,
+    if latest.get("status") == PLANNED:
+        chip_gw = int(latest["gameweek"])
+        if latest.get("chip"):
+            window = chip_window(rules, latest["chip"], chip_gw)
+            used.append({"chip": latest["chip"], "gameweek": chip_gw, "half": window.half if window else None,
                          "planned": True})
     else:
         chip_gw = int(state["next_gameweek"])
@@ -1076,6 +1136,8 @@ def get_manager_view(season: str = CURRENT_SEASON, photo_for: Optional[ss.PhotoF
         "season": season, "start_gameweek": start, "model": current.get("model") or MODEL,
         "rules": {"budget": rules.budget, "max_free_transfers": rules.max_free_transfers, "hit_cost": rules.hit_cost},
         "current": current,
+        "gameweeks": gameweek_list(entries, season, now),
+        "default_gameweek": default,
         "state": {"gameweek": state["gameweek"], "next_gameweek": state["next_gameweek"], "bank": state["bank"],
                   "free_transfers": state["free_transfers"], "team_value": state["team_value"]},
         "chips": chip_status(rules, used, chip_gw),

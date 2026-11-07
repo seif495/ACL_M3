@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, ChevronRight, Search, Sparkles, UserX } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { AlertTriangle, ArrowLeft, ChevronRight, ExternalLink, Search, Sparkles, UserX } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/appStore';
 import { apiService, handleApiError, type PlayerLeader, type PlayerRow } from '../services/api';
 import { PlayerWithClub } from '../components/PlayerWithClub';
@@ -9,6 +9,7 @@ import { SeasonLeaders, type LeadersFilters } from '../components/players/Season
 import { usePlayerAvatars } from '../hooks/usePlayerAvatars';
 import {
   Button,
+  ButtonLink,
   Card,
   Chip,
   Container,
@@ -24,6 +25,7 @@ import { PlayerProfileView } from '../components/players/PlayerProfileView';
 import { PLAYER_SEASONS } from '../components/players/seasons';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { useExamplePlayers } from '../hooks/useExamplePlayers';
+import { playerPath } from '../utils/playerPath';
 
 
 const DEFAULT_LEADERS_FILTERS: LeadersFilters = {
@@ -262,7 +264,7 @@ export function PlayerSearch() {
               chance: selectedPlayer.chance_of_playing_next_round,
             }}
             initialSeason={detailSeason}
-            toolbar={<BackButton onBack={
+            toolbar={<div className="flex flex-wrap items-center gap-2"><BackButton onBack={
               detailOrigin === 'history'
                 ? () => {
                     if (detailCompareState?.player1 && detailCompareState?.player2) {
@@ -290,7 +292,15 @@ export function PlayerSearch() {
                   ? 'Back to season leaders'
                   : 'Back to results'
             }
-            />}
+            />
+            <ButtonLink
+              to={`${playerPath(selectedPlayer.player_name ?? selectedPlayer.name ?? '')}${detailSeason && detailSeason !== 'All seasons' ? `?season=${encodeURIComponent(detailSeason)}` : ''}`}
+              variant="ghost"
+              size="sm"
+              icon={<ExternalLink className="h-4 w-4" aria-hidden="true" />}
+            >
+              Open full page
+            </ButtonLink></div>}
           />
         )}
       </div>
@@ -317,9 +327,14 @@ function ResultsList({
           const name: string = player.player_name ?? player.name ?? 'Unknown';
           return (
             <li key={`${player.element_id ?? name}-${i}`} className="border-b border-line last:border-0">
-              <button
-                type="button"
-                onClick={() => onSelect(player)}
+              <Link
+                to={playerPath(name)}
+                onClick={(e) => {
+                  // A new-tab click goes to the player's page; a plain click opens the profile here
+                  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                  e.preventDefault();
+                  onSelect(player);
+                }}
                 className="group flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-surface-2"
               >
                 <PlayerWithClub
@@ -355,7 +370,7 @@ function ResultsList({
                   </Chip>
                 )}
                 <ChevronRight className="h-4 w-4 shrink-0 text-fg-subtle group-hover:text-fg" aria-hidden="true" />
-              </button>
+              </Link>
             </li>
           );
         })}

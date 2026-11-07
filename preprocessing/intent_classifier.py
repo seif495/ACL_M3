@@ -51,6 +51,13 @@ class Intent(Enum):
     # transfer wording and the players involved (no pattern here: it needs the players)
     TRANSFER_ADVICE = "transfer_advice"
 
+    # Set by the API, like TRANSFER_ADVICE (no patterns here): a question about the visitor's own
+    # FPL team with its ID (services/my_team_assistant.py), a chip question, and the coming run
+    # of fixtures for clubs or players (services/fixture_runs.py)
+    MY_TEAM = "my_team"
+    CHIP_ADVICE = "chip_advice"
+    FIXTURE_RUN = "fixture_run"
+
     # Trivia
     TRIVIA = "trivia"
     
@@ -461,6 +468,9 @@ class IntentClassifier:
             Intent.PREDICTION: None,  # ML predictions handled separately in api_main.py, not via Cypher
             Intent.TEAM_OF_THE_WEEK: None,  # services/season_service.get_team_of_the_week, in api_main.py
             Intent.TRANSFER_ADVICE: None,  # services/transfer_advice.py, in api_main.py
+            Intent.MY_TEAM: None,  # services/my_team_assistant.py, in api_main.py
+            Intent.CHIP_ADVICE: None,  # services/my_team_assistant.py, in api_main.py
+            Intent.FIXTURE_RUN: None,  # services/fixture_runs.py, in api_main.py
         }
         
         return intent_to_query.get(intent, "")
@@ -486,6 +496,9 @@ class IntentClassifier:
             Intent.PREDICTION: "Get ML model predictions for future gameweeks",
             Intent.TEAM_OF_THE_WEEK: "Pick the best XI: predicted for the next gameweek, or a past gameweek's dream team",
             Intent.TRANSFER_ADVICE: "Weigh transfers (sell X for Y) on predicted points, price and fixtures",
+            Intent.MY_TEAM: "Advise on your own FPL team (captain, transfers, bench) by its team ID",
+            Intent.CHIP_ADVICE: "When to play a chip (bench boost, triple captain, free hit, wildcard)",
+            Intent.FIXTURE_RUN: "Clubs' coming fixture difficulty, or the best players over the next gameweeks",
             Intent.TRIVIA: "Play FPL trivia",
             Intent.RECOMMENDATION: "Get player recommendations",
             Intent.SEASON_SUMMARY: "Get season overview and statistics",

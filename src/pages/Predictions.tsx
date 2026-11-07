@@ -29,6 +29,7 @@ import {
   type Column,
 } from '../components/ui';
 import { SegmentedControl } from '../components/predictions/SegmentedControl';
+import { TopTenShare } from '../components/predictions/TopTenShare';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { usePlayerDialog } from '../hooks/usePlayerDialog';
 import { PlayerFilters } from '../components/players/PlayerFilters';
@@ -41,6 +42,12 @@ type PositionFilter = 'ALL' | 'GK' | 'DEF' | 'MID' | 'FWD';
 const PAGE_SIZE = 20;
 const MAX_ROWS = 50;
 type View = 'top' | 'value';
+type Horizon = 'next' | 'four';
+const HORIZON_WEEKS: Record<Horizon, number> = { next: 1, four: 4 };
+const HORIZONS: { value: Horizon; label: string; shortLabel: string }[] = [
+  { value: 'next', label: 'Next gameweek', shortLabel: 'Next GW' },
+  { value: 'four', label: 'Next 4 gameweeks', shortLabel: 'Next 4 GWs' },
+];
 
 const POSITIONS: { value: PositionFilter; label: string; shortLabel: string }[] = [
   { value: 'ALL', label: 'All players', shortLabel: 'All' },
@@ -248,6 +255,7 @@ export function Predictions() {
   const { mlAvailable, mlModelType } = useAppStore();
   const [selectedPosition, setSelectedPosition] = useState<string | undefined>(undefined);
   const [view, setView] = useState<View>('top');
+  const [horizon, setHorizon] = useState<Horizon>('next');
   const [filters, setFilters] = useState<PlayerFilterValues>(EMPTY_PLAYER_FILTERS);
   const [limit, setLimit] = useState(PAGE_SIZE);
   const q = useDebounced(filters.q.trim());
@@ -266,8 +274,8 @@ export function Predictions() {
     isFetching: fetchingTop,
     refetch: refetchTop,
   } = useQuery({
-    queryKey: ['ml', 'top-performers', selectedPosition, limit, apiFilters],
-    queryFn: () => apiService.predictTopPerformers(selectedPosition, limit, apiFilters),
+    queryKey: ['ml', 'top-performers', selectedPosition, limit, apiFilters, HORIZON_WEEKS[horizon]],
+    queryFn: () => apiService.predictTopPerformers(selectedPosition, limit, apiFilters, HORIZON_WEEKS[horizon]),
     placeholderData: keepPreviousData,
     enabled: mlAvailable,
     retry: 1,
@@ -304,6 +312,14 @@ export function Predictions() {
 
   const topRows: PredictionRow[] = (topPerformers?.predictions ?? []).map((p, i) => ({ ...(p as PredictionRow), rank: i + 1 }));
   const valueRows: PredictionRow[] = (bestValue?.predictions ?? []).map((p, i) => ({ ...(p as PredictionRow), rank: i + 1 }));
+
+  // Four-week view: the backend falls back to one gameweek (horizon 1, no `projected`) when projections are missing.
+  const wantsFour = horizon === 'four';
+  const projectedMode = wantsFour && (topPerformers?.metadata?.horizon ?? 1) > 1 && topRows.some((r) => r.projected?.length);
+  const projectionsMissing = wantsFour && !!topPerformers && !fetchingTop && !projectedMode;
+  const projectedWeeks: number[] = projectedMode
+    ? (topPerformers?.metadata?.horizon_gameweeks ?? topRows.find((r) => r.projected?.length)?.projected?.map((p) => p.gameweek) ?? [])
+    : [];
 
   const avatarByName = usePlayerAvatars([...topRows, ...valueRows].map((r) => r.player_name));
 
@@ -399,14 +415,33 @@ export function Predictions() {
       return price != null ? `£${price.toFixed(1)}m` : '–';
     },
   });
-  const topColumns: Column<PredictionRow>[] = [
-    rankColumn,
-    playerColumn,
-    { ...opponentColumn, hideBelow: 'sm' },
-    kickoffColumn,
-    priceColumn('md'),
-    pointsColumn(true),
-  ];
+  const weekColumns: Column<PredictionRow>[] = projectedWeeks.map((wk) => ({
+    key: `gw${wk}`,
+    header: `GW${wk}`,
+    description: `Projected points in gameweek ${wk}`,
+    align: 'right',
+    hideBelow: 'md',
+    sortValue: (r) => r.projected?.find((p) => p.gameweek === wk)?.points,
+    render: (r) => {
+      const pts = r.projected?.find((p) => p.gameweek === wk)?.points;
+      return <span className="tabular-nums text-fg-muted">{pts != null ? pts.toFixed(1) : '–'}</span>;
+    },
+  }));
+  const totalColumn: Column<PredictionRow> = {
+    key: 'projected_total',
+    header: 'Total',
+    description: `Projected points over the next ${projectedWeeks.length} gameweeks`,
+    align: 'right',
+    sortValue: (r) => r.projected_total,
+    render: (r) => (
+      <span className="font-display text-h3 font-bold tabular-nums text-accent">
+        {r.projected_total != null ? r.projected_total.toFixed(1) : '–'}
+      </span>
+    ),
+  };
+  const topColumns: Column<PredictionRow>[] = projectedMode
+    ? [rankColumn, playerColumn, { ...opponentColumn, hideBelow: 'sm' }, priceColumn('md'), ...weekColumns, totalColumn]
+    : [rankColumn, playerColumn, { ...opponentColumn, hideBelow: 'sm' }, kickoffColumn, priceColumn('md'), pointsColumn(true)];
   const valueColumns: Column<PredictionRow>[] = [
     rankColumn,
     playerColumn,
@@ -493,6 +528,38 @@ export function Predictions() {
             <PlayerFilters value={filters} onChange={changeFilters} search />
           </div>
 
+          {view === 'top' && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <SegmentedControl
+                label="Projection length"
+                value={horizon}
+                onChange={setHorizon}
+                options={HORIZONS}
+                className="self-start"
+              />
+              <TopTenShare
+                gameweek={gameweek}
+                positionLabel={positionLabel}
+                weeks={projectedMode ? projectedWeeks.length || HORIZON_WEEKS.four : 1}
+                items={topRows.flatMap((r) => {
+                  const points = projectedMode ? r.projected_total : r.predicted_points;
+                  if (points == null) return [];
+                  const fx = r.fixture_context;
+                  return [
+                    {
+                      name: r.player_name,
+                      label: displayName(r.player_name, r.web_name),
+                      team: r.team_name,
+                      photo: avatarByName[r.player_name],
+                      opponent: fx ? { team: fx.opponent_team, home: fx.home_away === 'home' } : null,
+                      points,
+                    },
+                  ];
+                })}
+              />
+            </div>
+          )}
+
           <TabPanel idPrefix="predictions" value={view} className="mt-4">
             {view === 'top' ? (
               errorTop ? (
@@ -504,19 +571,30 @@ export function Predictions() {
                   />
                 </Card>
               ) : (
+                <>
+                {projectionsMissing && (
+                  <p role="status" className="mb-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-data text-fg-muted">
+                    Projections for the next 4 gameweeks appear after the next prediction run.
+                  </p>
+                )}
                 <DataTable
-                  key="top"
-                  caption={`Highest predicted scorers, ${positionLabel}${gameweek ? `, gameweek ${gameweek}` : ''}`}
+                  key={projectedMode ? 'top-horizon' : 'top'}
+                  caption={
+                    projectedMode
+                      ? `Highest projected scorers over gameweeks ${projectedWeeks[0]} to ${projectedWeeks[projectedWeeks.length - 1]}, ${positionLabel}`
+                      : `Highest predicted scorers, ${positionLabel}${gameweek ? `, gameweek ${gameweek}` : ''}`
+                  }
                   columns={topColumns}
                   rows={topRows}
                   rowKey={(r) => r.player_name}
                   loading={loadingTop}
                   skeletonRows={12}
-                  initialSort={{ key: 'predicted_points', direction: 'desc' }}
+                  initialSort={{ key: projectedMode ? 'projected_total' : 'predicted_points', direction: 'desc' }}
                   onRowClick={dialog ? (r) => dialog.openPlayer(hintOf(r, avatarByName[r.player_name])) : undefined}
                   className={cn('transition-opacity', fetchingTop && !loadingTop && 'opacity-60')}
                   empty={hasPlayerFilters(filters) ? 'No players match these filters.' : 'No predictions for this position.'}
                 />
+                </>
               )
             ) : errorValue ? (
               <Card padded={false}>
@@ -564,6 +642,9 @@ export function Predictions() {
             <ul className="space-y-2 text-data text-fg-muted">
               <li>
                 <span className="font-semibold text-fg">xPts</span> is the model's expected points for the gameweek. Double gameweeks are summed.
+              </li>
+              <li>
+                The 4-gameweek view adds each player's projected points for the coming gameweeks from the same model run, with availability fading further ahead.
               </li>
               <li>Injured and suspended players are predicted 0; doubtful players are scaled by their chance of playing.</li>
               <li>Official FPL team news for doubtful or unavailable players is shown under their name.</li>

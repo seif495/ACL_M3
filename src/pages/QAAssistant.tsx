@@ -5,6 +5,8 @@ import { AlertTriangle, Loader2, MessageCircle, PanelRightClose, PanelRightOpen,
 import { useAppStore } from '../store/appStore';
 import { apiService } from '../services/api';
 import type { QueryResponse } from '../services/api';
+import { formatWait, type RateInfo } from '../services/assistantApi';
+import { readSavedTeamId } from '../components/myteam/format';
 import { Button } from '../components/ui';
 import { ChatMessage } from '../components/assistant/ChatMessage';
 import { Composer } from '../components/assistant/Composer';
@@ -14,12 +16,32 @@ import { abortAnswer, useAssistantAsk } from '../hooks/useAssistantAsk';
 import { cn } from '../utils/cn';
 import { usePageMeta } from '../hooks/usePageMeta';
 
-const EXAMPLES = [
-  'Who scored the most goals in 2022-23?',
-  'Which midfielder had the best points per game?',
-  'Show me top defenders by clean sheets',
-  'Who should I captain this gameweek?',
-];
+interface Example {
+  /** Short text on the chip (readable on phones). */
+  label: string;
+  /** What is sent. */
+  question: string;
+}
+
+/** Example questions for the coming gameweek; the transfer one only when a team ID is saved. */
+function examplesFor(gameweek: number | null, hasTeam: boolean): Example[] {
+  const gw = gameweek ? `GW${gameweek}` : 'this gameweek';
+  const out: Example[] = [
+    { label: `Captain for ${gw}?`, question: `Who should I captain in ${gw}?` },
+    { label: 'Best defenders, next 4 GWs', question: 'Best defenders for the next 4 gameweeks' },
+    { label: 'Easiest fixtures', question: 'Which teams have the easiest fixtures?' },
+  ];
+  if (hasTeam) out.push({ label: 'My transfers', question: 'What transfers should I make?' });
+  else out.push({ label: 'Top scorers 2025-26', question: 'Who scored the most goals in 2025-26?' });
+  return out;
+}
+
+/** How a rate-limit window reads: "this minute", "this hour". */
+function windowLabel(seconds: number) {
+  if (seconds <= 60) return 'this minute';
+  if (seconds <= 3600) return 'this hour';
+  return 'today';
+}
 
 const DETAILS_ID = 'assistant-query-details';
 // Keep following a streaming answer only while the reader is this close to the bottom
@@ -67,12 +89,46 @@ export function QAAssistant() {
     staleTime: 30_000,
   });
 
+  // The coming gameweek for the example questions (the shell already fetches it)
+  const { data: season } = useQuery({
+    queryKey: ['season-current'],
+    queryFn: () => apiService.getCurrentSeason(),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const [hasTeam] = useState(() => readSavedTeamId() != null);
+  const examples = examplesFor(season?.next_gameweek ?? null, hasTeam);
+
+  // Questions left (shown only when few), and the wait after the rate limit was hit
+  const [rate, setRate] = useState<RateInfo | null>(null);
+  const [limitedUntil, setLimitedUntil] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (limitedUntil == null) return;
+    const timer = window.setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (t >= limitedUntil) setLimitedUntil(null);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [limitedUntil]);
+  const waitSeconds = limitedUntil != null ? Math.max(0, Math.ceil((limitedUntil - now) / 1000)) : 0;
+
   const ask = useAssistantAsk({
     onDone: useCallback((response: QueryResponse) => {
       setLastQueryInfo(response);
       setAnnouncement(announcementFor(response));
     }, []),
     onError: useCallback((message: string) => setAnnouncement(`The assistant couldn't answer: ${message}`), []),
+    onRate: useCallback((info: RateInfo) => {
+      setRate(info);
+      setLimitedUntil(null);
+    }, []),
+    onRateLimited: useCallback((retryAfter: number | null) => {
+      const t = Date.now();
+      setNow(t);
+      setLimitedUntil(t + (retryAfter ?? 60) * 1000);
+    }, []),
   });
 
   // Follow the conversation while the reader is at the bottom; scrolling up stops it
@@ -191,18 +247,19 @@ export function QAAssistant() {
                   Stats, comparisons and predictions for every Premier League season since 2020-21, plus the current one.
                 </p>
                 <ul className="mt-6 flex max-w-xl flex-wrap justify-center gap-2" aria-label="Example questions">
-                  {EXAMPLES.map((example) => (
-                    <li key={example}>
+                  {examples.map((example) => (
+                    <li key={example.question}>
                       <button
                         type="button"
-                        onClick={() => send(example)}
+                        onClick={() => send(example.question)}
+                        title={example.question}
                         disabled={!neo4jConnected || pending}
                         className={cn(
                           'rounded-full border border-line-strong bg-surface px-3.5 py-1.5 text-data text-fg-muted transition-colors',
                           'hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-line-strong disabled:hover:text-fg-muted',
                         )}
                       >
-                        {example}
+                        {example.label}
                       </button>
                     </li>
                   ))}
@@ -251,6 +308,20 @@ export function QAAssistant() {
                   )}
                 </p>
               </div>
+            )}
+            {limitedUntil != null ? (
+              <p role="status" className="mb-1.5 px-1 text-micro text-warning">
+                Question limit reached. You can ask again in {formatWait(waitSeconds)}.
+              </p>
+            ) : (
+              rate &&
+              rate.remaining <= 5 && (
+                <p className="mb-1.5 px-1 text-micro text-fg-subtle">
+                  {rate.remaining === 0
+                    ? `No questions left ${windowLabel(rate.windowSeconds)}.`
+                    : `${rate.remaining} ${rate.remaining === 1 ? 'question' : 'questions'} left ${windowLabel(rate.windowSeconds)}.`}
+                </p>
+              )
             )}
             <Composer
               value={input}

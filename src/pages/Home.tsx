@@ -24,6 +24,7 @@ import { getClubAbbreviation } from '../utils/clubLogos';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { matchPath, teamPath } from '../utils/clubColors';
 import { NewsSection } from '../components/news/NewsSection';
+import { YourPanel } from '../components/personal/YourPanel';
 import { usePlayerDialog } from '../hooks/usePlayerDialog';
 import type { PlayerHint } from '../components/players/PlayerProfileView';
 import { cn } from '../utils/cn';
@@ -428,6 +429,7 @@ export function Home() {
   return (
     <>
       <Hero />
+      <YourPanel />
       {/* Two independent columns, so cards keep their natural height (rows of paired cards
           stretched the shorter one and left empty blocks). */}
       <Container className="grid items-start gap-5 py-6 lg:grid-cols-3">

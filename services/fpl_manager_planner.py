@@ -328,7 +328,8 @@ class _Milp:
         self.rows += 1
 
     def solve(self, time_limit: float):
-        from scipy.optimize import Bounds, LinearConstraint, milp
+        from scipy.optimize import Bounds, LinearConstraint
+        from services.milp_runner import milp              # one solver thread (HiGHS hangs across threads)
         from scipy.sparse import coo_matrix
 
         a = coo_matrix((np.concatenate(self._v), (np.concatenate(self._r), np.concatenate(self._c))),
@@ -358,7 +359,8 @@ class Solution:
 
 
 def solve_plan(pool: Sequence[PoolPlayer], bank: int, free_transfers: int, rules: Dict[str, int],
-               chip: Optional[str] = None, time_limit: float = SOLVE_TIME_LIMIT) -> Solution:
+               chip: Optional[str] = None, time_limit: float = SOLVE_TIME_LIMIT,
+               max_hits: int = MAX_HITS_PER_GW) -> Solution:
     """The best plan over len(pool[0].points) gameweeks, with `chip` played this gameweek.
 
     wildcard / freehit: this gameweek's transfers are free and unlimited, and the free transfers
@@ -414,7 +416,7 @@ def solve_plan(pool: Sequence[PoolPlayer], bank: int, free_transfers: int, rules
         m.gain(plays, w * (1.0 if boost else w_bench) * p)
         money = m.var(1, lb=0.0, ub=np.inf, integer=False, gain=BANK_TIEBREAK if t == horizon - 1 else 0.0)
         u = m.var(1, ub=0.0 if free_week and t == 0 else max_ft)
-        hits = m.var(1, ub=0.0 if free_week and t == 0 else MAX_HITS_PER_GW, gain=-w * (hit_cost + HIT_MARGIN))
+        hits = m.var(1, ub=0.0 if free_week and t == 0 else max_hits, gain=-w * (hit_cost + HIT_MARGIN))
         ft_next = m.var(1, lb=1.0, ub=max_ft, gain=FT_END_VALUE * DECAY ** horizon if t == horizon - 1 else 0.0)
         blocks.append((x, bi, bo, fh, s, k, f, g, money, u, hits))
 
@@ -706,7 +708,7 @@ def _player_entry(p: PoolPlayer, role: str, bench_order: Optional[int], captain:
 def plan(current: Dict[str, Any], projections: pd.DataFrame, rules: Optional[Dict[str, Any]], gameweek: int,
          chips_available: Any = (), horizon: int = DEFAULT_HORIZON, *, season: Optional[str] = None,
          deadline: Optional[str] = None, now: Optional[datetime] = None, model: Optional[str] = None,
-         time_limit: float = SOLVE_TIME_LIMIT) -> Dict[str, Any]:
+         time_limit: float = SOLVE_TIME_LIMIT, max_hits: int = MAX_HITS_PER_GW) -> Dict[str, Any]:
     """The planned gwNN.json entry (status "planned") for `gameweek`.
 
     current      {"squad": [{element, name, web_name, position, team, purchase_price,
@@ -716,6 +718,8 @@ def plan(current: Dict[str, Any], projections: pd.DataFrame, rules: Optional[Dic
     rules        {budget, team_limit, max_free_transfers, hit_cost, squad_size} (DEFAULT_RULES fill gaps)
     chips_available  the chips usable this gameweek with their window's last gameweek (chip_windows)
     horizon      gameweeks planned over, this one included (fewer when the projections stop)
+    max_hits     transfers beyond the free ones allowed per gameweek (0: free transfers only; the
+                 My team page lets a visitor choose; the ML manager keeps MAX_HITS_PER_GW)
 
     The entry also carries, per horizon gameweek, the plan's projected points, transfers, hits and
     free transfers, though only this gameweek's moves count, and `optimal`: False when a solve (with
@@ -734,8 +738,8 @@ def plan(current: Dict[str, Any], projections: pd.DataFrame, rules: Optional[Dic
     pool = build_pool(current, projections, gws)
     windows = chip_windows(chips_available, gameweek)
 
-    base = solve_plan(pool, bank, free_transfers, rules, None, time_limit)
-    options = {chip: solve_plan(pool, bank, free_transfers, rules, chip, time_limit)
+    base = solve_plan(pool, bank, free_transfers, rules, None, time_limit, max_hits)
+    options = {chip: solve_plan(pool, bank, free_transfers, rules, chip, time_limit, max_hits)
                for chip in CHIPS if chip in windows and chip_may_play(chip, pool, gws, base, windows)}
     chip, chip_why = chip_decision(pool, gws, base, options, windows)
     sol = options[chip] if chip else base

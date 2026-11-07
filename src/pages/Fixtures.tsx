@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
@@ -13,16 +13,24 @@ import {
   PageHeader,
   Select,
   SkeletonRows,
+  TabPanel,
+  Tabs,
   type FixtureStatus,
 } from '../components/ui';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { matchPath } from '../utils/clubColors';
+import { getGameweekScorers, type FixtureScorer } from '../services/scorersApi';
+import { DEFAULT_TICKER_LENGTH, FixtureTicker } from '../components/fixtures/FixtureTicker';
+
+type FixturesView = 'gameweek' | 'ticker';
 
 const STATUS: Record<SeasonFixture['status'], FixtureStatus> = {
   scheduled: 'scheduled',
   in_progress: 'live',
   finished: 'finished',
 };
+
+const toRowScorers = (list: FixtureScorer[]) => list.map((s) => ({ name: s.name, webName: s.web_name, kind: s.kind, minute: s.minute, extra: s.extra, count: s.count }));
 
 function dayKey(iso: string | null): string {
   if (!iso) return 'tbc';
@@ -54,6 +62,14 @@ export function Fixtures() {
   usePageMeta({ title: "Fixtures & results", description: "Every Premier League fixture and result of the 2026-27 season by gameweek, with kick-off times in your time zone." });
   const [params, setParams] = useSearchParams();
   const requested = Number(params.get('gw')) || undefined;
+  const view: FixturesView = params.get('view') === 'ticker' ? 'ticker' : 'gameweek';
+  const [tickerLength, setTickerLength] = useState<number>(DEFAULT_TICKER_LENGTH);
+  const changeView = (next: FixturesView) => {
+    const p = new URLSearchParams(params);
+    if (next === 'ticker') p.set('view', 'ticker');
+    else p.delete('view');
+    setParams(p, { replace: true });
+  };
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['fixtures', requested ?? 'default'],
@@ -64,6 +80,15 @@ export function Fixtures() {
 
   const gameweeks = data?.gameweeks ?? [];
   const gw = data?.gameweek;
+  const anyFinished = (data?.fixtures ?? []).some((f) => f.status === 'finished');
+  // Scorers are a nicety: a failure just leaves the scores bare
+  const { data: scorers } = useQuery({
+    queryKey: ['gameweek-scorers', gw],
+    queryFn: ({ signal }) => getGameweekScorers(gw as number, signal),
+    enabled: !!gw && anyFinished && view === 'gameweek',
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
   const index = gw ? gameweeks.indexOf(gw) : -1;
   const groups = useMemo(() => groupByDay(data?.fixtures ?? []), [data]);
 
@@ -81,6 +106,23 @@ export function Fixtures() {
         description="Every match of the season, with final scores once games finish. Kick-off times are shown in your local time zone."
       />
 
+      <Tabs
+        label="Fixture views"
+        idPrefix="fixtures"
+        value={view}
+        onChange={changeView}
+        items={[
+          { value: 'gameweek', label: 'By gameweek' },
+          { value: 'ticker', label: 'Difficulty ticker' },
+        ]}
+        className="mb-4"
+      />
+
+      <TabPanel idPrefix="fixtures" value={view}>
+      {view === 'ticker' ? (
+        <FixtureTicker length={tickerLength} onLengthChange={setTickerLength} />
+      ) : (
+      <>
       <div className="mb-4 flex items-center justify-between gap-2">
         <Button
           variant="secondary"
@@ -151,12 +193,16 @@ export function Fixtures() {
                   kickoff={f.kickoff_time}
                   status={STATUS[f.status]}
               to={matchPath(f.id)}
+                  scorers={scorers?.[f.id] ? { home: toRowScorers(scorers[f.id].home), away: toRowScorers(scorers[f.id].away) } : null}
                 />
               ))}
             </Card>
           ))
         )}
       </div>
+      </>
+      )}
+      </TabPanel>
     </Container>
   );
 }

@@ -19,6 +19,7 @@ import {
 import { SegmentedControl } from "../components/trivia/DifficultyPicker";
 import { cn } from "../utils/cn";
 import { usePageMeta } from '../hooks/usePageMeta';
+import { DailyChallenge } from "../components/trivia/DailyChallenge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -589,6 +590,8 @@ export function Trivia() {
               />
             ))}
           </section>
+
+          {view === "select" && <DailyChallenge />}
 
           {view === "select" && (
             <StartScreen

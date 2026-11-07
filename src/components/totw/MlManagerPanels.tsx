@@ -59,7 +59,7 @@ function TransferSide({ direction, player, price }: { direction: 'out' | 'in'; p
   );
 }
 
-function TransferRow({ transfer }: { transfer: MlManagerTransfer }) {
+export function TransferRow({ transfer }: { transfer: MlManagerTransfer }) {
   return (
     <li
       className={cn(

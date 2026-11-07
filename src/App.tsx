@@ -4,20 +4,24 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from './components/shell/AppShell';
 import { NotFound } from './pages/NotFound';
 import { PageSkeleton } from './components/shell/PageSkeleton';
+import { RouteErrorBoundary } from './components/shell/RouteErrorBoundary';
 
-// Route-level code splitting: recharts (Search/Compare), react-markdown + framer-motion (Q&A/Trivia)
+// Route-level code splitting: react-markdown + framer-motion (Q&A/Trivia)
 // are only downloaded with the page that needs them.
 const loadQAAssistant = () => import('./pages/QAAssistant').then((m) => ({ default: m.QAAssistant }));
 const loadTrivia = () => import('./pages/Trivia').then((m) => ({ default: m.Trivia }));
 const loadPlayerSearch = () => import('./pages/PlayerSearch').then((m) => ({ default: m.PlayerSearch }));
+const loadPlayerPage = () => import('./pages/PlayerPage').then((m) => ({ default: m.PlayerPage }));
 const loadPlayerComparison = () => import('./pages/PlayerComparison').then((m) => ({ default: m.PlayerComparison }));
 const loadPredictions = () => import('./pages/Predictions').then((m) => ({ default: m.Predictions }));
 const loadSettings = () => import('./pages/Settings').then((m) => ({ default: m.Settings }));
 const loadHome = () => import('./pages/Home').then((m) => ({ default: m.Home }));
 const loadFixtures = () => import('./pages/Fixtures').then((m) => ({ default: m.Fixtures }));
 const loadLeagueTable = () => import('./pages/LeagueTable').then((m) => ({ default: m.LeagueTable }));
+const loadMyTeam = () => import('./pages/MyTeam').then((m) => ({ default: m.MyTeam }));
 const loadTeamOfTheWeek = () => import('./pages/TeamOfTheWeek').then((m) => ({ default: m.TeamOfTheWeek }));
 const loadModelInsights = () => import('./pages/ModelInsights').then((m) => ({ default: m.ModelInsights }));
+const loadInsights = () => import('./pages/Insights').then((m) => ({ default: m.Insights }));
 const loadPrivacy = () => import('./pages/Privacy').then((m) => ({ default: m.Privacy }));
 const loadTerms = () => import('./pages/Terms').then((m) => ({ default: m.Terms }));
 const loadContact = () => import('./pages/Contact').then((m) => ({ default: m.Contact }));
@@ -30,6 +34,7 @@ const loadDesignSystem = () => import('./pages/DesignSystem').then((m) => ({ def
 const QAAssistant = lazy(loadQAAssistant);
 const Trivia = lazy(loadTrivia);
 const PlayerSearch = lazy(loadPlayerSearch);
+const PlayerPage = lazy(loadPlayerPage);
 const PlayerComparison = lazy(loadPlayerComparison);
 const Predictions = lazy(loadPredictions);
 const Settings = lazy(loadSettings);
@@ -37,7 +42,13 @@ const Home = lazy(loadHome);
 const Fixtures = lazy(loadFixtures);
 const LeagueTable = lazy(loadLeagueTable);
 const TeamOfTheWeek = lazy(loadTeamOfTheWeek);
+const MyTeam = lazy(loadMyTeam);
 const ModelInsights = lazy(loadModelInsights);
+const Insights = lazy(loadInsights);
+const loadGameweekPage = () => import('./pages/GameweekPage').then((m) => ({ default: m.GameweekPage }));
+const GameweekPage = lazy(loadGameweekPage);
+const loadGlossary = () => import('./pages/Glossary').then((m) => ({ default: m.Glossary }));
+const Glossary = lazy(loadGlossary);
 const Privacy = lazy(loadPrivacy);
 const Terms = lazy(loadTerms);
 const Contact = lazy(loadContact);
@@ -63,16 +74,22 @@ function Redirect({ to }: { to: string }) {
   return <Navigate to={to} replace state={location.state} />;
 }
 
-// Suspense boundary per route so the Layout (sidebar/header) stays mounted while a page chunk loads.
+// Suspense boundary per route so the Layout (sidebar/header) stays mounted while a page chunk loads,
+// and an error boundary (keyed by path) so a page that fails to load doesn't blank the whole site.
 function Page({ children }: { children: ReactNode }) {
-  return <Suspense fallback={<PageSkeleton />}>{children}</Suspense>;
+  const { pathname } = useLocation();
+  return (
+    <RouteErrorBoundary key={pathname}>
+      <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+    </RouteErrorBoundary>
+  );
 }
 
 function App() {
   // Warm the remaining route chunks once the browser is idle so later navigation is instant.
   useEffect(() => {
     const preload = () => {
-      [loadHome, loadFixtures, loadLeagueTable, loadTeams, loadTeamPage, loadMatchPage, loadTeamOfTheWeek, loadQAAssistant, loadPredictions, loadModelInsights, loadPlayerSearch, loadPlayerComparison, loadTrivia, loadSettings].forEach((load) => {
+      [loadHome, loadFixtures, loadLeagueTable, loadTeams, loadTeamPage, loadMatchPage, loadMyTeam, loadTeamOfTheWeek, loadQAAssistant, loadPredictions, loadModelInsights, loadInsights, loadGameweekPage, loadPlayerSearch, loadPlayerPage, loadPlayerComparison, loadTrivia, loadGlossary, loadSettings].forEach((load) => {
         void load().catch(() => undefined);
       });
     };
@@ -101,11 +118,17 @@ function App() {
             <Route path="teams" element={<Page><Teams /></Page>} />
             <Route path="teams/:slug" element={<Page><TeamPage /></Page>} />
             <Route path="matches/:id" element={<Page><MatchPage /></Page>} />
+            <Route path="my-team" element={<Page><MyTeam /></Page>} />
             <Route path="team-of-the-week" element={<Page><TeamOfTheWeek /></Page>} />
             <Route path="assistant" element={<Page><QAAssistant /></Page>} />
             <Route path="players" element={<Page><PlayerSearch /></Page>} />
+            <Route path="players/:slug" element={<Page><PlayerPage /></Page>} />
             <Route path="predictions" element={<Page><Predictions /></Page>} />
             <Route path="model" element={<Page><ModelInsights /></Page>} />
+            <Route path="insights" element={<Page><Insights /></Page>} />
+            <Route path="gameweek" element={<Page><GameweekPage /></Page>} />
+            <Route path="gameweek/:gw" element={<Page><GameweekPage /></Page>} />
+            <Route path="glossary" element={<Page><Glossary /></Page>} />
             <Route path="compare" element={<Page><PlayerComparison /></Page>} />
             <Route path="trivia" element={<Page><Trivia /></Page>} />
             <Route path="settings" element={<Page><Settings /></Page>} />

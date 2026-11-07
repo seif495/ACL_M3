@@ -11,7 +11,9 @@ export interface NavItem {
 
 export const PRIMARY_NAV: NavItem[] = [
   { to: '/', label: 'Home' },
+  { to: '/my-team', label: 'My team' },
   { to: '/fixtures', label: 'Fixtures' },
+  { to: '/gameweek', label: 'Gameweek' },
   { to: '/table', label: 'Table' },
   { to: '/teams', label: 'Clubs' },
   { to: '/team-of-the-week', label: 'Team of the Week' },
@@ -23,7 +25,9 @@ export const PRIMARY_NAV: NavItem[] = [
 export const MORE_NAV: NavItem[] = [
   { to: '/compare', label: 'Compare players' },
   { to: '/model', label: 'Model insights' },
+  { to: '/insights', label: 'Captains & differentials' },
   { to: '/trivia', label: 'Trivia' },
+  { to: '/glossary', label: 'Glossary' },
   { to: '/settings', label: 'Settings' },
 ];
 
@@ -163,8 +167,8 @@ export function SiteHeader({ onOpenSearch, activePath }: SiteHeaderProps) {
               className="flex h-9 items-center gap-2 rounded-md border border-white/15 bg-black/20 px-2.5 text-sm text-fg-muted transition-colors hover:border-white/30 hover:text-fg xl:w-56"
             >
               <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="hidden xl:inline">Find a player</span>
-              <span className="sr-only xl:hidden">Find a player</span>
+              <span className="hidden xl:inline">Search</span>
+              <span className="sr-only xl:hidden">Search</span>
               <kbd className="ml-auto hidden rounded-sm border border-white/20 px-1.5 text-micro text-fg-subtle xl:inline">/</kbd>
             </button>
             <button

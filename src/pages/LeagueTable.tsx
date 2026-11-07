@@ -1,30 +1,19 @@
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { apiService, handleApiError, type TableRow } from '../services/api';
-import { Card, ClubCrest, Container, DataTable, ErrorState, PageHeader, type Column } from '../components/ui';
+import { apiService, handleApiError, isNotFoundError, type TableRow } from '../services/api';
+import { forecastApi } from '../services/forecastApi';
+import { Card, ClubCrest, Container, DataTable, EmptyState, ErrorState, PageHeader, TabPanel, Tabs, type Column } from '../components/ui';
+import { ForecastTable } from '../components/forecast/ForecastTable';
+import { ZONE_BAR, ZONE_LABEL, zone } from '../components/forecast/zones';
 import { getClubAbbreviation } from '../utils/clubLogos';
 import { FormChips, TeamLink } from '../components/teams/MatchBits';
 import { cn } from '../utils/cn';
 import { usePageMeta } from '../hooks/usePageMeta';
 
-// Season-end zones. Shown as a coloured bar beside the position, always with a legend.
-function zone(position: number, total: number): 'ucl' | 'europe' | 'relegation' | null {
-  if (position <= 4) return 'ucl';
-  if (position <= 6) return 'europe';
-  if (position > total - 3) return 'relegation';
-  return null;
-}
+type View = 'table' | 'forecast';
 
-const ZONE_BAR = {
-  ucl: 'bg-accent',
-  europe: 'bg-accent-2',
-  relegation: 'bg-danger',
-} as const;
-
-const ZONE_LABEL = {
-  ucl: 'Champions League place',
-  europe: 'European place',
-  relegation: 'Relegation zone',
-} as const;
+// Season-end zones (components/forecast/zones.ts) are shown as a coloured bar beside the
+// position, always with a legend.
 
 const RESULT_STYLE = {
   W: 'bg-accent text-accent-on',
@@ -60,6 +49,19 @@ export function LeagueTable() {
     staleTime: 5 * 60_000,
   });
   const total = data?.rows.length ?? 20;
+
+  // ?view=forecast opens the predicted final table; it is fetched only once opened
+  const [params, setParams] = useSearchParams();
+  const view: View = params.get('view') === 'forecast' ? 'forecast' : 'table';
+  const setView = (next: View) =>
+    setParams(next === 'forecast' ? { view: 'forecast' } : {}, { replace: true });
+  const forecast = useQuery({
+    queryKey: ['table-forecast'],
+    queryFn: ({ signal }) => forecastApi.getTableForecast(signal),
+    enabled: view === 'forecast',
+    staleTime: 5 * 60_000,
+    retry: (n, e) => !isNotFoundError(e) && n < 1,
+  });
 
   const columns: Column<TableRow>[] = [
     {
@@ -136,31 +138,61 @@ export function LeagueTable() {
       <PageHeader
         eyebrow={data?.season ?? 'This season'}
         title="Premier League table"
-        description="Calculated from every finished match this season: 3 points for a win, 1 for a draw."
+        description={
+          view === 'forecast'
+            ? 'Where each club is likely to finish: the rest of the season played out thousands of times from this season’s results.'
+            : 'Calculated from every finished match this season: 3 points for a win, 1 for a draw.'
+        }
       />
 
-      {isError ? (
-        <Card>
-          <ErrorState title="Couldn't load the table" description={handleApiError(error)} onRetry={() => refetch()} />
-        </Card>
-      ) : (
-        <>
-          <DataTable
-            caption="League table"
-            columns={columns}
-            rows={data?.rows ?? []}
-            rowKey={(r) => r.team}
-            loading={isLoading}
-            skeletonRows={20}
-            empty="No matches have been played yet."
-          />
-          <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-data text-fg-subtle" aria-label="Table zones">
-            <li className="flex items-center gap-2"><span aria-hidden="true" className="h-3 w-1 rounded-full bg-accent" />Champions League places</li>
-            <li className="flex items-center gap-2"><span aria-hidden="true" className="h-3 w-1 rounded-full bg-accent-2" />Europa / Conference League places</li>
-            <li className="flex items-center gap-2"><span aria-hidden="true" className="h-3 w-1 rounded-full bg-danger" />Relegation</li>
-          </ul>
-        </>
-      )}
+      <Tabs
+        label="League table views"
+        idPrefix="league"
+        value={view}
+        onChange={setView}
+        className="mb-4"
+        items={[
+          { value: 'table', label: 'Current table' },
+          { value: 'forecast', label: 'Predicted final table' },
+        ]}
+      />
+
+      <TabPanel idPrefix="league" value={view}>
+        {view === 'forecast' ? (
+          forecast.isError ? (
+            <Card padded={false}>
+              {isNotFoundError(forecast.error) ? (
+                <EmptyState title="No forecast yet" description="The predicted table isn't available on this server yet." />
+              ) : (
+                <ErrorState title="Couldn't load the forecast" description={handleApiError(forecast.error)} onRetry={() => forecast.refetch()} />
+              )}
+            </Card>
+          ) : (
+            <ForecastTable data={forecast.data} loading={forecast.isLoading} />
+          )
+        ) : isError ? (
+          <Card>
+            <ErrorState title="Couldn't load the table" description={handleApiError(error)} onRetry={() => refetch()} />
+          </Card>
+        ) : (
+          <>
+            <DataTable
+              caption="League table"
+              columns={columns}
+              rows={data?.rows ?? []}
+              rowKey={(r) => r.team}
+              loading={isLoading}
+              skeletonRows={20}
+              empty="No matches have been played yet."
+            />
+            <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-data text-fg-subtle" aria-label="Table zones">
+              <li className="flex items-center gap-2"><span aria-hidden="true" className="h-3 w-1 rounded-full bg-accent" />Champions League places</li>
+              <li className="flex items-center gap-2"><span aria-hidden="true" className="h-3 w-1 rounded-full bg-accent-2" />Europa / Conference League places</li>
+              <li className="flex items-center gap-2"><span aria-hidden="true" className="h-3 w-1 rounded-full bg-danger" />Relegation</li>
+            </ul>
+          </>
+        )}
+      </TabPanel>
     </Container>
   );
 }

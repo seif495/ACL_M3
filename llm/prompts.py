@@ -61,6 +61,8 @@ You present data clearly and draw meaningful conclusions."""
         chat_history: Optional[List[Dict[str, str]]] = None,
         model_key: Optional[str] = None,
         transfer_context: Optional[str] = None,
+        team_context: Optional[str] = None,
+        fixture_context: Optional[str] = None,
     ) -> str:
         """
         Template for Q&A responses.
@@ -76,6 +78,10 @@ You present data clearly and draw meaningful conclusions."""
             model_key: The model being used (to customize prompt)
             transfer_context: Optional Transfer Analysis (services/transfer_advice.py) for a
                 "sell X for Y" question, with its own answering rules
+            team_context: Optional facts about the visitor's own FPL team (squad, suggested XI,
+                planner moves, chips; services/my_team_assistant.py), with its own rules
+            fixture_context: Optional coming fixtures (difficulty per club) or multi-gameweek
+                projections (services/fixture_runs.py)
         """
         # Use enhanced persona for Llama 3.3 70B
         if model_key in ("gpt-oss-120b", "gpt-oss-20b", "llama-3.3-70b"):
@@ -157,6 +163,27 @@ FirstMessage: {str(is_first_message)}
 - Keep it short: a few sentences or one line per move.
 """
 
+        if fixture_context:
+            template += f"""
+### Fixtures and Projections (the {CURRENT_SEASON} season's coming gameweeks):
+{fixture_context}
+"""
+
+        team_rules = ""
+        if team_context:
+            template += f"""
+### Your FPL Team (the visitor's own squad, with the site's predictions):
+{team_context}
+"""
+            team_rules = """
+**YOUR-TEAM RULES (the visitor's team is given above):**
+- Answer for this squad: "your team", "your captain". Name only players in the squad, plus the players the transfer plan buys.
+- Captain and line-up: recommend the suggested captain, XI and bench order unless the user asks to compare.
+- Transfers: lead with the planner's moves (or that it suggests rolling the transfer), with the bank and free transfers; never suggest a buy the bank can't afford.
+- Chips: say plainly whether to play one this week, from the planner's chip line and the chips still available.
+- If the team couldn't be loaded, say so in one short sentence, then answer generally.
+"""
+
         template += f"""
 ### User Question:
 {question}
@@ -181,7 +208,7 @@ FirstMessage: {str(is_first_message)}
 - NEVER ignore ML Predictions when they are present - they are the most important data for future performance questions.
 - A ranked ML list is in order, best first. When you name a second choice or an alternative, it is the next entry in that order; for a position ("a midfield option"), it is that position's highest-ranked entry. Never skip a higher-ranked player for a better-known one, and never call a player "next" when someone is ranked between them.
 - When the ML Predictions list several players, compare them on their own numbers. Never say a player has no forecast when he has a line above; only a player whose entry says he is not in the current FPL game has none.
-{transfer_rules}
+{transfer_rules}{team_rules}
 **UNDERSTANDING USER INTENT:**
 - Vague responses like "hmm", "i dont know", "not sure", "maybe" mean the user is UNCERTAIN - offer helpful choices
 - When user is uncertain, DON'T force information - instead say: "Would you like to hear about [specific option A] or [specific option B]?"
@@ -189,13 +216,16 @@ FirstMessage: {str(is_first_message)}
 - If user says "I don't care" or "no thanks", acknowledge and ask what they'd prefer to know about instead
 
 **DATA USAGE RULES:**
-- Use ONLY the exact data provided in "Knowledge Graph Data" and "ML Predictions" above
+- Use ONLY the exact data provided in the sections above ("Knowledge Graph Data", "ML Predictions" and any team, fixture or transfer section)
 - The data is NUMBERED and SORTED - entry #1 is the TOP/BEST result
 - When asked "who is the most/top/best", answer with entry #1 from the data
 - Quote EXACT numbers from the data - never make up statistics
 - DO NOT hallucinate or use training knowledge - ONLY use the data above
 
-**RESPONSE GUIDELINES:**
+**RESPONSE GUIDELINES - DECISION FIRST:**
+- The FIRST sentence is the direct answer or the recommendation (who to pick, what to do, the number asked for). No preamble.
+- Then at most 2-3 supporting numbers that decide it (e.g. predicted points, the opponent, a price or a season total).
+- Don't list averages or index values (e.g. "average influence 23.89", "ICT 7.2 per game") unless the user asked for them.
 - Keep responses SHORT (2-3 sentences max unless user asks for more detail)
 - When user is vague/uncertain: Offer 2-3 specific choices and let THEM decide
 - When user is engaged: Provide the requested information with relevant context
@@ -215,7 +245,7 @@ Good: "Erling Haaland with 36 goals in the 2022-23 season." (direct answer with 
 
 User: "who will score next gameweek?" or "who should I pick?"
 IF ML PREDICTIONS ARE AVAILABLE:
-Good: "Based on our ML model, Haaland is forecast for 8.0 points in his next match vs Bournemouth (Home). He's the top predicted performer."
+Good: "Pick Haaland: our ML model forecasts 8.0 points vs Bournemouth (Home), the top prediction this gameweek."
 Bad: "Haaland scored 36 goals in the 2022-23 season." (WRONG - giving historical stats instead of predictions)
 
 User: "how many points do you think he's gonna earn?" (after discussing a player)

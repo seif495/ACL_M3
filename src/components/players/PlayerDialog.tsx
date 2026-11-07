@@ -3,7 +3,9 @@ import { ExternalLink, X } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { PlayerDialogContext, type PlayerDialogApi } from '../../hooks/usePlayerDialog';
 import { ButtonLink } from '../ui';
+import { playerPath } from '../../utils/playerPath';
 import { PlayerProfileView, type PlayerHint } from './PlayerProfileView';
+import { WatchButton } from './WatchButton';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -76,24 +78,17 @@ function PlayerDialog({ player, season, onClose }: { player: PlayerHint; season?
             compact
             headingId={headingId}
             toolbar={
-              <ButtonLink
-                to="/players"
-                state={{
-                  player: {
-                    player_name: player.name,
-                    team_name: player.team ?? undefined,
-                    position: player.position ?? undefined,
-                    avatar: player.photo ?? undefined,
-                  },
-                  season,
-                  returnTo: 'history',
-                }}
-                variant="ghost"
-                size="sm"
-                icon={<ExternalLink className="h-4 w-4" aria-hidden="true" />}
-              >
-                Full page
-              </ButtonLink>
+              <div className="flex flex-wrap items-center gap-2">
+                <WatchButton name={player.name} />
+                <ButtonLink
+                  to={`${playerPath(player.name)}${season && season !== 'All seasons' ? `?season=${encodeURIComponent(season)}` : ''}`}
+                  variant="ghost"
+                  size="sm"
+                  icon={<ExternalLink className="h-4 w-4" aria-hidden="true" />}
+                >
+                  Open full page
+                </ButtonLink>
+              </div>
             }
           />
         </div>

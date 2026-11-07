@@ -1,9 +1,13 @@
 import type { ReactNode } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Bot, CheckCircle2, Database, Loader2, RefreshCw, Server, XCircle } from 'lucide-react';
+import { Bot, CheckCircle2, ChevronDown, Database, Loader2, RefreshCw, Server, Star, XCircle } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { apiService, handleApiError } from '../services/api';
-import { Button, Card, Container, ErrorState, PageHeader, SectionHeading, SkeletonRows } from '../components/ui';
+import { Button, Card, Container, ErrorState, PageHeader, SectionHeading, Select, SkeletonRows } from '../components/ui';
+import { useFavouriteClub, useWatchlist } from '../lib/personal';
+import { forgetTeamId, readSavedTeamId } from '../components/myteam/format';
+import { useClubs } from '../hooks/usePlayerFilters';
 import { OptionGroup } from '../components/settings/OptionGroup';
 import { cn } from '../utils/cn';
 import { usePageMeta } from '../hooks/usePageMeta';
@@ -145,8 +149,88 @@ function SystemStatus() {
   );
 }
 
+function Preferences() {
+  const { club, set } = useFavouriteClub();
+  const { data: clubs } = useClubs();
+  const watchlist = useWatchlist();
+  const [teamId, setTeamId] = useState<number | null>(() => readSavedTeamId());
+  const options = clubs ?? [];
+  const clubList = club && !options.includes(club) ? [club, ...options] : options;
+
+  return (
+    <Card>
+      <SectionHeading
+        as="h2"
+        size="md"
+        title={
+          <span className="flex items-center gap-2">
+            <Star className="h-4 w-4 text-accent" aria-hidden="true" />
+            Your preferences
+          </span>
+        }
+        subtitle="Kept only in this browser. There are no accounts."
+      />
+      <dl className="divide-y divide-line">
+        <div className="grid gap-2 py-3 first:pt-0 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)] sm:items-center">
+          <dt>
+            <label htmlFor="favourite-club" className="text-data font-semibold text-fg">Favourite club</label>
+          </dt>
+          <dd>
+            <Select
+              id="favourite-club"
+              value={club ?? ''}
+              onChange={(e) => set(e.target.value || null)}
+              className="max-w-sm"
+            >
+              <option value="">None</option>
+              {clubList.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </Select>
+          </dd>
+        </div>
+        <div className="grid gap-2 py-3 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)] sm:items-center">
+          <dt className="text-data font-semibold text-fg">FPL team</dt>
+          <dd className="flex flex-wrap items-center gap-3">
+            <span className="text-data text-fg-muted">{teamId ? `Team ID ${teamId} is saved` : 'No team ID saved'}</span>
+            {teamId && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  forgetTeamId();
+                  setTeamId(null);
+                }}
+              >
+                Forget
+              </Button>
+            )}
+          </dd>
+        </div>
+        <div className="grid gap-2 py-3 last:pb-0 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)] sm:items-center">
+          <dt className="text-data font-semibold text-fg">Watchlist</dt>
+          <dd className="flex flex-wrap items-center gap-3">
+            <span className="text-data text-fg-muted">
+              {watchlist.names.length} {watchlist.names.length === 1 ? 'player' : 'players'}
+            </span>
+            {watchlist.names.length > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => watchlist.names.forEach((n) => watchlist.remove(n))}
+              >
+                Clear
+              </Button>
+            )}
+          </dd>
+        </div>
+      </dl>
+    </Card>
+  );
+}
+
 export function Settings() {
-  usePageMeta({ title: "Settings", description: "Choose the assistant's language model and retrieval method, and check the system status." });
+  usePageMeta({ title: "Settings", description: "Set your favourite club, forget your saved FPL team or watchlist, and adjust the assistant's technical options." });
   const {
     selectedModel,
     retrievalMethod,
@@ -161,9 +245,21 @@ export function Settings() {
       <PageHeader
         eyebrow="Preferences"
         title="Settings"
-        description="Choose the language model and how the assistant retrieves facts from the knowledge graph. Changes apply to your next question."
+        description="Your favourite club, saved team and watchlist. The technical options for the assistant are under Advanced."
       />
 
+      <div className="space-y-4 lg:space-y-6">
+        <Preferences />
+
+        <details className="group rounded-lg border border-line bg-surface/60">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+            <span className="font-display text-h3 font-bold text-fg">Advanced</span>
+            <ChevronDown className="h-4 w-4 text-fg-subtle transition-transform group-open:rotate-180" aria-hidden="true" />
+          </summary>
+          <div className="space-y-4 border-t border-line p-4 sm:p-5 lg:space-y-6">
+            <p className="text-data text-fg-muted">
+              These are technical options for the assistant: which language model answers and how it looks facts up. The defaults work well, and changes apply to your next question.
+            </p>
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] lg:gap-6">
         <div className="space-y-4 lg:space-y-6">
           <Card>
@@ -222,6 +318,9 @@ export function Settings() {
         </div>
 
         <SystemStatus />
+      </div>
+          </div>
+        </details>
       </div>
     </Container>
   );

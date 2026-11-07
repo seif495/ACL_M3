@@ -9,11 +9,15 @@ const LINES = [
   { position: 'FWD', label: 'Forwards' },
 ] as const;
 
+/** The backend marks the visitor's own suggested XI (a "my team" answer) with `variant`. */
+type PitchCard = PitchCardData & { variant?: 'my_team'; team_name?: string | null };
+
 /** Best XI on a compact pitch, with the bench and the squad's totals. */
-export function PitchAnswerCard({ card }: { card: PitchCardData }) {
+export function PitchAnswerCard({ card }: { card: PitchCard }) {
   const photoOf = useCardPhotos([...card.starters, ...card.bench].map((s) => s.player));
   const { ask, disabled } = useAsk();
   const predicted = card.mode === 'predicted';
+  const mine = card.variant === 'my_team';
   // Tapping a player asks about them: their prediction for a predicted squad, else their season
   const askAbout = (name: string) =>
     ask && !disabled ? () => ask(predicted ? predictionQuestion(name) : `${name} stats this season`) : undefined;
@@ -24,7 +28,7 @@ export function PitchAnswerCard({ card }: { card: PitchCardData }) {
     <CardFrame
       icon={predicted ? 'star' : 'trophy'}
       eyebrow={`Gameweek ${card.gameweek} · ${predicted ? 'predicted' : 'actual points'}`}
-      title={predicted ? 'Best squad' : 'Dream team'}
+      title={mine ? card.team_name || 'Your team' : predicted ? 'Best squad' : 'Dream team'}
       aside={
         <p className="text-right">
           <span className="block font-display text-h2 font-extrabold leading-none text-accent">{pts(card.total_points)}</span>
@@ -32,19 +36,25 @@ export function PitchAnswerCard({ card }: { card: PitchCardData }) {
         </p>
       }
       footer={
-        <CardLink to={predicted ? '/team-of-the-week' : `/team-of-the-week?mode=actual&gw=${card.gameweek}`}>
-          Team of the week
-        </CardLink>
+        mine ? (
+          <CardLink to="/my-team">My team</CardLink>
+        ) : (
+          <CardLink to={predicted ? '/team-of-the-week' : `/team-of-the-week?mode=actual&gw=${card.gameweek}`}>
+            Team of the week
+          </CardLink>
+        )
       }
     >
       <Section className="px-2 sm:px-3">
         <p className="mb-2 px-2 text-data text-fg-muted">
           {card.formation}
-          {predicted && card.total_cost != null && card.budget != null
-            ? ` · £${card.total_cost.toFixed(1)}m of £${card.budget.toFixed(1)}m, 3 per club at most`
-            : ' · best XI by points scored'}
+          {mine && card.total_cost != null && card.budget != null
+            ? ` · suggested XI · £${(card.budget - card.total_cost).toFixed(1)}m in the bank`
+            : predicted && card.total_cost != null && card.budget != null
+              ? ` · £${card.total_cost.toFixed(1)}m of £${card.budget.toFixed(1)}m, 3 per club at most`
+              : ' · best XI by points scored'}
         </p>
-        <Pitch compact label={`${predicted ? 'Predicted best' : 'Dream'} team, gameweek ${card.gameweek}`}>
+        <Pitch compact label={`${mine ? 'Your suggested' : predicted ? 'Predicted best' : 'Dream'} team, gameweek ${card.gameweek}`}>
           {LINES.map((line) => (
             <PitchRow compact key={line.position} label={line.label}>
               {card.starters
@@ -72,7 +82,7 @@ export function PitchAnswerCard({ card }: { card: PitchCardData }) {
       </Section>
 
       {card.bench.length > 0 && (
-        <Section title="Bench" aside="Cheapest picks that complete the squad">
+        <Section title="Bench" aside={mine ? 'In the order to set it' : 'Cheapest picks that complete the squad'}>
           <ol className="grid grid-cols-2 gap-2 [@container(min-width:36rem)]:grid-cols-4">
             {card.bench.map((s) => (
               <li key={s.player.name} className="flex min-w-0 items-center gap-2 rounded-md border border-line bg-bg/40 p-1.5">

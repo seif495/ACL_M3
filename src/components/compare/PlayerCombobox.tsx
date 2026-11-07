@@ -1,5 +1,5 @@
-import type { KeyboardEvent, MutableRefObject } from 'react';
-import { CornerDownLeft, Search } from 'lucide-react';
+import type { CSSProperties, KeyboardEvent, MutableRefObject } from 'react';
+import { CornerDownLeft, Search, X } from 'lucide-react';
 import { PlayerAvatar, PositionBadge } from '../ui';
 import { cn } from '../../utils/cn';
 
@@ -10,8 +10,10 @@ interface PlayerComboboxProps {
   id: string;
   listId: string;
   label: string;
-  /** 1 = mint side, 2 = cyan side. */
-  side: 1 | 2;
+  /** The slot's colour (CSS colour), shown as a dot and on focus. */
+  color: string;
+  /** Adds a remove button next to the label. */
+  onRemove?: () => void;
   value: string;
   placeholder?: string;
   disabled?: boolean;
@@ -35,7 +37,8 @@ export function PlayerCombobox({
   id,
   listId,
   label,
-  side,
+  color,
+  onRemove,
   value,
   placeholder,
   disabled,
@@ -55,10 +58,22 @@ export function PlayerCombobox({
 
   return (
     <div className="relative flex flex-col gap-1.5">
-      <label htmlFor={inputId} className="flex items-center gap-2 text-micro font-semibold uppercase text-fg-muted">
-        <span aria-hidden="true" className={cn('h-2.5 w-2.5 rounded-full', side === 1 ? 'bg-accent' : 'bg-accent-2')} />
-        {label}
-      </label>
+      <div className="flex items-center justify-between gap-2">
+        <label htmlFor={inputId} className="flex items-center gap-2 text-micro font-semibold uppercase text-fg-muted">
+          <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />
+          {label}
+        </label>
+        {onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={`Remove ${label}`}
+            className="-my-1 inline-flex h-6 w-6 items-center justify-center rounded-sm text-fg-subtle transition-colors hover:text-fg"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
+      </div>
       <div className="relative">
         <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle" />
         <input
@@ -79,10 +94,10 @@ export function PlayerCombobox({
           autoComplete="off"
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
+          style={{ '--slot-color': color } as CSSProperties}
           className={cn(
             'h-11 w-full rounded-md border border-line-strong bg-surface-2 pl-9 pr-3 text-sm text-fg placeholder:text-fg-subtle',
-            'transition-colors hover:border-fg-subtle disabled:cursor-not-allowed disabled:opacity-50',
-            side === 1 ? 'focus:border-accent' : 'focus:border-accent-2',
+            'transition-colors hover:border-fg-subtle focus:border-[var(--slot-color)] disabled:cursor-not-allowed disabled:opacity-50',
             error && 'border-danger hover:border-danger',
           )}
         />

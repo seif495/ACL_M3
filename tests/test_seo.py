@@ -88,9 +88,9 @@ def _use_page_meta(file):
 
 
 PAGE_FILES = {"/": "Home.tsx", "/fixtures": "Fixtures.tsx", "/table": "LeagueTable.tsx", "/teams": "Teams.tsx",
-              "/team-of-the-week": "TeamOfTheWeek.tsx", "/players": "PlayerSearch.tsx",
-              "/predictions": "Predictions.tsx", "/model": "ModelInsights.tsx", "/assistant": "QAAssistant.tsx",
-              "/compare": "PlayerComparison.tsx", "/trivia": "Trivia.tsx", "/settings": "Settings.tsx",
+              "/my-team": "MyTeam.tsx", "/team-of-the-week": "TeamOfTheWeek.tsx", "/players": "PlayerSearch.tsx",
+              "/predictions": "Predictions.tsx", "/insights": "Insights.tsx", "/model": "ModelInsights.tsx", "/assistant": "QAAssistant.tsx",
+              "/compare": "PlayerComparison.tsx", "/trivia": "Trivia.tsx", "/settings": "Settings.tsx", "/glossary": "Glossary.tsx",
               "/privacy": "Privacy.tsx", "/terms": "Terms.tsx", "/contact": "Contact.tsx", "/stats": "SiteStats.tsx"}
 
 
@@ -107,7 +107,9 @@ def test_every_preview_page_is_a_caddy_route():
     snippet = re.search(r"\(page_routes\)\s*\{\s*path ([^\n]+)\n", caddy)
     assert snippet, "the page_routes snippet"
     routes = set(snippet.group(1).split())
-    assert set(seo.PAGES) | set(seo.REDIRECTS) | {"/design", "/teams/*", "/matches/*"} == routes
+    expected = set(seo.PAGES) | set(seo.REDIRECTS) | {"/design", "/teams/*", "/matches/*", "/players/*",
+                                                       "/gameweek", "/gameweek/*"}
+    assert routes == expected
 
 
 def test_static_titles_and_descriptions():
@@ -366,3 +368,64 @@ def test_preview_with_an_escaped_path_still_finds_the_club():
         r = client.get(f"/api/seo/preview?{query}")
         assert r.status_code == 200 and "<title>Arsenal" in r.text, query
         assert "%25" not in r.text and "%2F" not in r.text   # the canonical URL is the plain path
+
+
+# ------------------------------------------------------------------ player pages
+
+class PlayerConn(FakeConn):
+    ROWS = [
+        {"name": "Erling Haaland", "team": "Man City", "position": "FWD", "total_points": 120, "goals": 15, "minutes": 900},
+        {"name": "Martin Ødegaard", "team": "Arsenal", "position": "MID", "total_points": 80, "goals": 3, "minutes": 800},
+        {"name": "Bench Warmer", "team": "Everton", "position": "DEF", "total_points": 0, "goals": 0, "minutes": 0},
+    ]
+
+    def execute_query(self, query, params=None):
+        if "SEASON_STATS" in query and "RETURN p.name AS name" in query:
+            self.queries.append(query)
+            return [dict(r) for r in self.ROWS]
+        return super().execute_query(query, params)
+
+
+def test_player_preview_title_and_description(monkeypatch):
+    monkeypatch.setattr(seo, "_predicted_points", lambda name: 6.24 if name == "Erling Haaland" else None)
+    meta = meta_for("/players/erling-haaland", PlayerConn())
+    assert meta.path == "/players/erling-haaland" and meta.title == "Erling Haaland · Pitch Me"
+    assert meta.description.startswith(f"Erling Haaland, Man City forward: 120 points and 15 goals in {CURRENT_SEASON}.")
+    assert "Predicted 6.2 points next gameweek." in meta.description
+    odegaard = meta_for("/players/martin-odegaard", PlayerConn())
+    assert odegaard.title == "Martin Ødegaard · Pitch Me" and "Predicted" not in odegaard.description
+    assert "Bench Warmer, Everton defender:" in meta_for("/players/bench-warmer", PlayerConn()).description
+
+
+def test_unknown_player_gets_the_site_text():
+    meta = meta_for("/players/nobody-here", PlayerConn())
+    assert (meta.title, meta.description) == (seo.SITE_TITLE, seo.SITE_DESCRIPTION)
+    ss.clear_cache()
+    failing = meta_for("/players/erling-haaland", FakeConn(fail=True))
+    assert failing.title == seo.SITE_TITLE
+
+
+def test_sitemap_lists_players_best_scorers_first():
+    xml = seo.data_sitemap(PlayerConn(), ORIGIN)
+    locs = [u.find(SM + "loc").text for u in ET.fromstring(xml)]
+    players = [loc for loc in locs if "/players/" in loc]
+    assert players[:2] == [f"{ORIGIN}/players/erling-haaland", f"{ORIGIN}/players/martin-odegaard"]
+    assert f"{ORIGIN}/teams/arsenal" in locs
+
+
+def test_player_sitemap_is_capped():
+    rows = {f"p-{i}": {"total_points": i} for i in range(seo.PLAYER_SITEMAP_LIMIT + 50)}
+    entries = seo.player_sitemap_entries(rows)
+    assert len(entries) == seo.PLAYER_SITEMAP_LIMIT and entries[0]["path"] == f"/players/p-{seo.PLAYER_SITEMAP_LIMIT + 49}"
+
+
+def test_gameweek_pages_use_the_gameweek_pages_text():
+    with open(os.path.join(ROOT, "src", "pages", "GameweekPage.tsx"), encoding="utf-8") as f:
+        source = f.read()
+    current = meta_for("/gameweek")
+    assert current.path == "/gameweek" and current.title == "Gameweek · Pitch Me"
+    assert current.description in source
+    week = meta_for("/gameweek/12")
+    assert week.path == "/gameweek/12" and week.title == "Gameweek 12 · Pitch Me"
+    assert week.description.replace("12", "${gw}") in source.replace("\n", " ")
+    assert meta_for("/gameweek/99").path == "/gameweek/99" and meta_for("/gameweek/99").title != week.title

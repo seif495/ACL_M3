@@ -1,4 +1,5 @@
 import { useState, type MouseEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Loader2, Trophy } from 'lucide-react';
 import {
@@ -12,6 +13,7 @@ import { usePlayerAvatars } from '../../hooks/usePlayerAvatars';
 import { getClubAbbreviation } from '../../utils/clubLogos';
 import { cn } from '../../utils/cn';
 import { displayName } from '../../utils/playerNames';
+import { playerPath } from '../../utils/playerPath';
 import {
   Button,
   Card,
@@ -312,12 +314,20 @@ function LeaderPlayerCell({
 }: {
   row: PlayerLeader;
   photo: string | null | undefined;
-  onSelect: (e: MouseEvent<HTMLButtonElement>) => void;
+  onSelect: (e: MouseEvent<HTMLElement>) => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <Link
+      to={playerPath(row.name)}
+      onClick={(e) => {
+        // A new-tab click goes to the player's page; a plain click opens the profile here
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+          e.stopPropagation(); // not the row's own click, which would open the profile here too
+          return;
+        }
+        e.preventDefault();
+        onSelect(e);
+      }}
       // Narrow on phones so rank + player + Pts fit 390px without scrolling sideways
       className="flex w-full min-w-0 max-w-[10.5rem] items-center gap-2 rounded-sm text-left sm:max-w-[16rem]"
     >
@@ -334,6 +344,6 @@ function LeaderPlayerCell({
           <StatusBadge status={row.status} chance={row.chance_of_playing_next_round} news={row.news} className="shrink-0" />
         </span>
       </span>
-    </button>
+    </Link>
   );
 }

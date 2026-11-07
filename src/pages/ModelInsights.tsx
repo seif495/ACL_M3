@@ -12,18 +12,20 @@ import { ButtonLink, Card, Container, EmptyState, PageHeader, TabPanel, Tabs } f
 import { ExplainOverview } from '../components/explain/ExplainOverview';
 import { ExplainError, ExplainSkeleton, ExplainUnavailable } from '../components/explain/ExplainStates';
 import { FeatureEffects } from '../components/explain/FeatureEffects';
+import { TrackRecordEmpty, TrackRecordError, TrackRecordSkeleton, TrackRecordView } from '../components/explain/TrackRecord';
 import { PlayerExplainer } from '../components/explain/PlayerExplainer';
 import { PlayerChips, PlayerSearchBox } from '../components/explain/PlayerPicker';
+import { getTrackRecord } from '../services/trackRecordApi';
 import { usePageMeta } from '../hooks/usePageMeta';
 
 // Model insights: SHAP and LIME explanations of the points model's next-gameweek predictions.
-// URL: ?tab=overview|player|effects (overview is the default); ?player=<FPL element id> picks a
+// URL: ?tab=overview|player|effects|record (overview is the default); ?player=<FPL element id> picks a
 // player and implies the player tab; ?feature=<name> picks the feature on the effects tab.
 
-type View = 'overview' | 'player' | 'effects';
+type View = 'overview' | 'player' | 'effects' | 'record';
 
 function parseView(tab: string | null, hasPlayer: boolean): View {
-  if (tab === 'overview' || tab === 'player' || tab === 'effects') return tab;
+  if (tab === 'overview' || tab === 'player' || tab === 'effects' || tab === 'record') return tab;
   return hasPlayer ? 'player' : 'overview';
 }
 
@@ -69,6 +71,15 @@ export function ModelInsights() {
     queryFn: ({ signal }) => apiService.getExplainDependence(feature!, signal),
     enabled: view === 'effects' && !!feature,
     placeholderData: keepPreviousData,
+    staleTime: STALE_MS,
+    retry,
+  });
+
+  // The track record reads saved files, not the SHAP inputs, so it works without the summary.
+  const record = useQuery({
+    queryKey: ['ml-track-record'],
+    queryFn: ({ signal }) => getTrackRecord(undefined, signal),
+    enabled: view === 'record',
     staleTime: STALE_MS,
     retry,
   });
@@ -126,6 +137,7 @@ export function ModelInsights() {
             { value: 'overview', label: 'Overview' },
             { value: 'player', label: 'Explain a player' },
             { value: 'effects', label: 'Feature effects' },
+            { value: 'record', label: 'Track record' },
           ]}
         />
       </div>
@@ -210,6 +222,20 @@ export function ModelInsights() {
                 }
               />
             )))}
+
+        {view === 'record' &&
+          (record.isError ? (
+            // A 404 means the endpoint isn't deployed yet: the same as "nothing to show"
+            isNotFoundError(record.error) ? (
+              <TrackRecordEmpty />
+            ) : (
+              <TrackRecordError error={record.error} onRetry={() => record.refetch()} />
+            )
+          ) : record.data ? (
+            <TrackRecordView data={record.data} />
+          ) : (
+            <TrackRecordSkeleton />
+          ))}
       </TabPanel>
     </Container>
   );

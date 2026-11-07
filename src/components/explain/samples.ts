@@ -10,6 +10,7 @@ import type {
   LimeWeight,
   PlayerExplanation,
 } from '../../services/api';
+import type { TrackRecord } from '../../services/trackRecordApi';
 
 /*
  * SAMPLE DATA for the hidden /design page only: made-up players and numbers in the exact shape of
@@ -449,4 +450,65 @@ export const SAMPLE_DEPENDENCE: ExplainDependence = (() => {
     return { name: `Sample Player ${i + 1}`, element: 9100 + i, position, value: round(value, 2), shap: round(shap) };
   });
   return { feature: meta.feature, label: meta.label, group: meta.group, description: meta.description, points };
+})();
+
+// --- Track record ------------------------------------------------------------------------------
+
+/** Eight made-up finished gameweeks in the shape of /api/ml/track-record. */
+export const SAMPLE_TRACK_RECORD: TrackRecord = (() => {
+  const rand = rng(7);
+  const gameweeks = Array.from({ length: 8 }, (_, i) => {
+    const gw = 9 + i;
+    const best = 70 + Math.round(rand() * 25);
+    const fpl = 34 + Math.round(rand() * 26);
+    const model = Math.max(20, fpl + Math.round((rand() - 0.42) * 22));
+    const maeFpl = round(1.15 + rand() * 0.25, 3);
+    const maeModel = round(maeFpl + (rand() - 0.6) * 0.12, 3);
+    const captainPoints = [2, 5, 6, 8, 9, 12, 3, 7][i];
+    const average = 44 + Math.round(rand() * 20);
+    return {
+      gameweek: gw,
+      deadline: `2026-11-${String(7 + i * 7).padStart(2, '0')}T17:30:00+00:00`,
+      archived_at: `2026-11-${String(7 + i * 7).padStart(2, '0')}T12:00:00+00:00`,
+      model: 'v4',
+      fpl_source: 'element_snapshots' as const,
+      mae: { model: maeModel, fpl: maeFpl, n: 330 },
+      top10: { model, fpl, best, n: 10 },
+      captain: { element: 100 + i, name: `Sample Player ${i + 1}`, predicted: round(6 + rand() * 2, 2), points: captainPoints, hit: captainPoints >= 6 },
+      players: 640,
+      squad: { points: average + Math.round((rand() - 0.4) * 30), bench_points: Math.round(rand() * 10), predicted: round(60 + rand() * 12, 2), average, highest: average + 60 + Math.round(rand() * 40), formation: '3-4-3' },
+    };
+  });
+  const avg = (f: (g: (typeof gameweeks)[number]) => number) => gameweeks.reduce((a, g) => a + f(g), 0) / gameweeks.length;
+  const hits = gameweeks.filter((g) => g.captain.hit).length;
+  const squadBeat = gameweeks.filter((g) => g.squad.points > g.squad.average).length;
+  return {
+    season: '2026-27',
+    gameweeks,
+    missing: [
+      { gameweek: 1, reason: 'No prediction was saved before this deadline' },
+      { gameweek: 2, reason: 'No prediction was saved before this deadline' },
+      { gameweek: 3, reason: 'No prediction was saved before this deadline' },
+      { gameweek: 7, reason: 'Squad recorded by hand; no predictions were saved' },
+    ],
+    totals: {
+      gameweeks: gameweeks.length,
+      compared_gameweeks: gameweeks.length,
+      mae: { model: round(avg((g) => g.mae.model), 3), fpl: round(avg((g) => g.mae.fpl), 3), n: 330 * gameweeks.length, gameweeks: gameweeks.length },
+      top10: { model: round(avg((g) => g.top10.model), 2), fpl: round(avg((g) => g.top10.fpl), 2), best: round(avg((g) => g.top10.best), 2), gameweeks: gameweeks.length },
+      captain: { hits, of: gameweeks.length, rate: round(hits / gameweeks.length), mean_points: round(avg((g) => g.captain.points), 2), threshold: 6 },
+      squad: { mean_points: round(avg((g) => g.squad.points), 2), mean_average: round(avg((g) => g.squad.average), 2), beat_average: squadBeat, of: gameweeks.length, gameweeks: gameweeks.length },
+      beating_fpl: {
+        mae: { wins: gameweeks.filter((g) => g.mae.model < g.mae.fpl).length, of: gameweeks.length },
+        top10: { wins: gameweeks.filter((g) => g.top10.model > g.top10.fpl).length, of: gameweeks.length },
+      },
+    },
+    calibration: [
+      { label: '0-2', low: 0, high: 2, n: 4100, predicted: 0.62, actual: 0.71 },
+      { label: '2-4', low: 2, high: 4, n: 1150, predicted: 2.85, actual: 2.62 },
+      { label: '4-6', low: 4, high: 6, n: 260, predicted: 4.7, actual: 4.31 },
+      { label: '6+', low: 6, high: null, n: 38, predicted: 6.9, actual: 5.84 },
+    ],
+    note: null,
+  };
 })();

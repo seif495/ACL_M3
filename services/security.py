@@ -65,6 +65,21 @@ class RateLimiter:
                     del self._hits[k]
             return None
 
+    def remaining(self, key: str) -> Optional[Tuple[int, float]]:
+        """(requests left, window seconds) for the tightest limit, without recording a hit;
+        None when there are no limits."""
+        if not self.limits:
+            return None
+        now = self.clock()
+        with self._lock:
+            hits = list(self._hits.get(key, ()))
+        best: Optional[Tuple[int, float]] = None
+        for limit, window in self.limits:
+            left = max(0, limit - sum(1 for t in hits if now - t < window))
+            if best is None or left < best[0]:
+                best = (left, window)
+        return best
+
     def dependency(self, request: Request) -> None:
         """FastAPI dependency: 429 with Retry-After when the caller is over a limit."""
         wait = self.check(client_key(request))

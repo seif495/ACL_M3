@@ -8,11 +8,11 @@ GET /api/seo/preview?path=<page path>, which answers a small HTML document with 
 title, description, canonical URL, Open Graph and Twitter tags and a plain link. Fixed pages
 reuse the title and description they set with usePageMeta (PAGES; tests/test_seo.py checks
 they still match src/pages). Club and match pages are described from the season's cached
-fixtures. It never fails: an unknown club or match, a missing connection or any data error
+fixtures, player pages (/players/<slug>) from SEASON_STATS and the predictions file. It never fails: an unknown club or match, a missing connection or any data error
 gets the site-wide text, with 200.
 
 Sitemap: GET /api/seo/sitemap.xml, served as /sitemap-data.xml, lists every club page and
-match page of the current season. The build's sitemap.xml is an index of it and of
+match page of the current season, plus its players (best scorers first, at most 900). The build's sitemap.xml is an index of it and of
 sitemap-pages.xml, the fixed routes (vite.config.ts).
 
 Absolute URLs use SITE_URL or SITE_ADDRESS (the backend reads deploy/.env, like Caddy), else
@@ -33,6 +33,7 @@ from fastapi.responses import HTMLResponse, Response
 
 from config.settings import CURRENT_SEASON
 from services import season_service as ss
+from services.player_pages import slugify_player
 from services.teams import slugify
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,10 @@ PAGES: Dict[str, Tuple[Optional[str], str]] = {
     "/table": ("Premier League table", "The 2026-27 Premier League table calculated from every finished match: "
                                        "points, goal difference, form and next fixture."),
     "/teams": ("Clubs", "Every Premier League club this season: position, form, results, fixtures, squad and news."),
+    "/insights": ("Insights", "FPL decision tools: the best captain options, differentials and budget picks, "
+                  "this gameweek's transfers and price changes, and set-piece takers."),
+    "/my-team": ("My team", "Import your FPL team by its ID: see our model’s suggested XI, your squad’s predicted "
+                            "points and the best transfers to make."),
     "/team-of-the-week": ("Team of the Week", "The highest-scoring FPL squad our model predicts for the next "
                                               "gameweek (£100m, 3 per club), how its past picks scored, each "
                                               "week's dream team, and a season-long team the model manages."),
@@ -72,11 +77,13 @@ PAGES: Dict[str, Tuple[Optional[str], str]] = {
                                  "drives this gameweek’s forecasts and why each player got his number."),
     "/assistant": ("Assistant", "Ask questions about FPL players, teams and seasons. Answers come from a knowledge "
                                 "graph of every season since 2020-21."),
-    "/compare": ("Compare players", "Compare two FPL players head to head across any season: points, goals, "
-                                    "assists, bonus, form and more."),
+    "/compare": ("Compare players", "Compare up to four FPL players side by side: predicted points, price, points "
+                                    "per million, underlying rates, fixtures and season stats."),
     "/trivia": ("Trivia", "Test your Fantasy Premier League knowledge with quiz questions built from real FPL data."),
-    "/settings": ("Settings", "Choose the assistant's language model and retrieval method, and check the system "
-                              "status."),
+    "/settings": ("Settings", "Set your favourite club, forget your saved FPL team or watchlist, and adjust the "
+                              "assistant's technical options."),
+    "/glossary": ("Glossary", "Plain-language explanations of Fantasy Premier League terms and how the Pitch Me "
+                              "prediction model works."),
     "/privacy": ("Privacy policy", "What Pitch Me stores (very little), what is sent to third parties, and how to "
                                    "change your choices."),
     "/terms": ("Terms of use", "The terms for using Pitch Me: a free, fan-made FPL project whose predictions and "
@@ -91,6 +98,10 @@ NOINDEX = {"/stats", "/design"}
 # The same rules api_main applies to /api/teams/{slug} and /api/matches/{fixture_id}
 CLUB_PATH = re.compile(r"/teams/([a-z0-9-]{2,40})")
 MATCH_PATH = re.compile(r"/matches/([A-Za-z0-9-]{3,40})")
+PLAYER_PATH = re.compile(r"/players/([a-z0-9-]{2,80})")      # services/player_pages.SLUG_PATTERN
+GAMEWEEK_PATH = re.compile(r"/gameweek(?:/([1-9]|[1-3][0-9]))?")  # /gameweek and /gameweek/1../39
+PLAYER_SITEMAP_LIMIT = 900
+_POSITION_WORDS = {"GK": "goalkeeper", "DEF": "defender", "MID": "midfielder", "FWD": "forward"}
 
 _DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -242,6 +253,16 @@ def static_meta(path: str) -> PageMeta:
     return PageMeta(path, full_title(title), description, noindex=path in NOINDEX)
 
 
+def gameweek_meta(gw: Optional[str]) -> PageMeta:
+    """src/pages/GameweekPage.tsx's usePageMeta text (its title depends on the gameweek)."""
+    if not gw:
+        return PageMeta("/gameweek", full_title("Gameweek"),
+                        "The current Premier League gameweek: live points and bonus, or the recap.")
+    return PageMeta(f"/gameweek/{gw}", full_title(f"Gameweek {gw}"),
+                    f"Gameweek {gw} of the Premier League season: live points and bonus, the Dream Team, the "
+                    "biggest hauls, and how the model and the ML manager scored.")
+
+
 def _club_rows(conn) -> Dict[str, Dict[str, Any]]:
     """slug -> the club's table row, for the current season (cached like the season views)."""
     fixtures = ss.load_fixtures(conn, CURRENT_SEASON)
@@ -293,6 +314,69 @@ def match_meta(conn, fixture_id: str) -> Optional[PageMeta]:
     return PageMeta(f"/matches/{f['id']}", match_title(f), match_description(f, season))
 
 
+PLAYERS_QUERY = """
+MATCH (p:Player)-[st:SEASON_STATS]->(:Season {id: $season})
+RETURN p.name AS name, st.team AS team, st.position AS position,
+       coalesce(st.total_points, 0) AS total_points, coalesce(st.goals, 0) AS goals,
+       coalesce(st.minutes, 0) AS minutes
+ORDER BY total_points DESC, name
+"""
+
+
+def _player_rows(conn) -> Dict[str, Dict[str, Any]]:
+    """slug -> the current season's SEASON_STATS row of every player who has one (the best
+    scorer when two names share a slug). One cached query."""
+    def load() -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        for r in conn.execute_query(PLAYERS_QUERY, {"season": CURRENT_SEASON}) or []:
+            slug = slugify_player(r.get("name") or "")
+            if PLAYER_PATH.fullmatch(f"/players/{slug}"):
+                out.setdefault(slug, dict(r))
+        return out
+    return ss._cached(("seo-players", CURRENT_SEASON), load)
+
+
+def player_description(row: Dict[str, Any], season: str, predicted: Optional[float]) -> str:
+    """One or two sentences, e.g. Erling Haaland, Man City forward: 120 points and 15 goals in 2026-27."""
+    who = row["name"]
+    team = row.get("team")
+    role = _POSITION_WORDS.get(row.get("position") or "")
+    label = " ".join(x for x in (team, role) if x)
+    head = f"{who}, {label}" if label else who
+    points, goals = int(row.get("total_points") or 0), int(row.get("goals") or 0)
+    if int(row.get("minutes") or 0) > 0:
+        parts = [f"{head}: {_count(points, 'point', 'points')} and {_count(goals, 'goal', 'goals')} in {season}."]
+    else:
+        parts = [f"{head}: {season} FPL stats."]
+    if predicted is not None:
+        parts.append(f"Predicted {predicted:.1f} points next gameweek.")
+    parts.append("Season stats, points by gameweek and per-90 rates.")
+    return " ".join(parts)
+
+
+def _predicted_points(name: str) -> Optional[float]:
+    from services.predictions import get_predictions_df
+    df = get_predictions_df()
+    if df is None:
+        return None
+    hit = df[df["name_lower"] == name.lower()]
+    return float(hit["predicted_points"].sum()) if len(hit) else None
+
+
+def player_meta(conn, slug: str) -> Optional[PageMeta]:
+    if conn is None:
+        return None
+    row = _player_rows(conn).get(slug)
+    if row is None:
+        return None
+    try:
+        predicted = _predicted_points(row["name"])
+    except Exception:             # the predictions are a bonus, not required
+        predicted = None
+    return PageMeta(f"/players/{slug}", full_title(row["name"]),
+                    player_description(row, CURRENT_SEASON, predicted))
+
+
 def page_meta(raw_path: Optional[str], get_conn: Callable[[], Any]) -> PageMeta:
     """The page's preview text. Never raises: anything unknown or failing gets the site text.
     `get_conn` is only called for club and match pages."""
@@ -304,6 +388,12 @@ def page_meta(raw_path: Optional[str], get_conn: Callable[[], Any]) -> PageMeta:
         match = MATCH_PATH.fullmatch(path)
         if match:
             return match_meta(get_conn(), match.group(1)) or generic_meta(path)
+        gameweek = GAMEWEEK_PATH.fullmatch(path)
+        if gameweek:
+            return gameweek_meta(gameweek.group(1))
+        player = PLAYER_PATH.fullmatch(path)
+        if player:
+            return player_meta(get_conn(), player.group(1)) or generic_meta(path)
         return static_meta(path)
     except Exception as exc:          # a crawler must always get a page
         logger.warning("Link preview for %s fell back to the site text: %s", path, exc)
@@ -364,6 +454,13 @@ def sitemap_entries(fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return entries
 
 
+def player_sitemap_entries(rows: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Current-season players with stats, best scorers first, at most PLAYER_SITEMAP_LIMIT."""
+    ranked = sorted(rows.items(), key=lambda kv: (-int(kv[1].get("total_points") or 0), kv[0]))
+    return [{"path": f"/players/{slug}", "lastmod": None, "changefreq": "weekly", "priority": 0.4}
+            for slug, _ in ranked[:PLAYER_SITEMAP_LIMIT]]
+
+
 def sitemap_xml(entries: List[Dict[str, Any]], origin: str) -> str:
     out = ['<?xml version="1.0" encoding="UTF-8"?>',
            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
@@ -381,8 +478,15 @@ def sitemap_xml(entries: List[Dict[str, Any]], origin: str) -> str:
 
 def data_sitemap(conn, origin: str) -> str:
     fixtures = ss.load_fixtures(conn, CURRENT_SEASON)
-    return ss._cached(("seo-sitemap", CURRENT_SEASON, origin),
-                      lambda: sitemap_xml(sitemap_entries(fixtures), origin))
+
+    def build() -> str:
+        entries = sitemap_entries(fixtures)
+        try:
+            entries += player_sitemap_entries(_player_rows(conn))
+        except Exception as exc:      # players are extra: clubs and matches still go out
+            logger.warning("Player pages left out of the sitemap: %s", exc)
+        return sitemap_xml(entries, origin)
+    return ss._cached(("seo-sitemap", CURRENT_SEASON, origin), build)
 
 
 # ------------------------------------------------------------------ routes

@@ -28,22 +28,25 @@ import {
 } from '../components/ui';
 import { ModelReview } from '../components/totw/ModelReview';
 import { MlManager } from '../components/totw/MlManager';
+import { TeamBuilder } from '../components/totw/builder/TeamBuilder';
 import { PITCH_LINES } from '../components/totw/pitchLines';
+import { TeamOfWeekShare } from '../components/totw/TeamOfWeekShare';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { usePlayerDialog } from '../hooks/usePlayerDialog';
 import { PlayerNameButton } from '../components/players/PlayerNameButton';
 import { displayName } from '../utils/playerNames';
 
 // The page's tabs: the two squads from /api/team-of-the-week, the model's past picks against what
-// they scored (/api/model-review), and the season-long team the model manages (/api/ml-manager).
+// they scored (/api/model-review), the season-long team the model manages (/api/ml-manager), and
+// a builder that re-runs the predicted squad under your own limits (/api/team-of-the-week/build).
 // `mode` in the URL; predicted is the default.
-type View = TeamOfWeekMode | 'review' | 'manager';
+type View = TeamOfWeekMode | 'review' | 'manager' | 'build';
 
 /** How often a gameweek being played refreshes its live points. */
 const LIVE_REFRESH_MS = 60_000;
 
 const parseView = (value: string | null): View =>
-  value === 'actual' || value === 'review' || value === 'manager' ? value : 'predicted';
+  value === 'actual' || value === 'review' || value === 'manager' || value === 'build' ? value : 'predicted';
 
 function fmtPoints(points: number, mode: TeamOfWeekMode) {
   return mode === 'predicted' ? points.toFixed(1) : String(Math.round(points));
@@ -117,7 +120,8 @@ export function TeamOfTheWeek() {
     queryFn: () => apiService.getTeamOfTheWeek(mode, gameweek),
     placeholderData: keepPreviousData,
     staleTime: 5 * 60_000,
-    enabled: view === 'predicted' || view === 'actual',
+    // The Build tab compares with the default predicted team, so it loads it too.
+    enabled: view === 'predicted' || view === 'actual' || view === 'build',
   });
 
   const reviewGw = view === 'review' ? requestedGw : undefined;
@@ -172,7 +176,9 @@ export function TeamOfTheWeek() {
               ? 'How the model’s pick for a past gameweek actually did: each player’s predicted and real FPL points, against the average FPL score.'
               : view === 'manager'
                 ? 'A season-long team run by our points model since GW9, under the game’s rules: a £100m budget, free transfers, hits and chips, ranked against the managers who started that week.'
-                : 'The best-performing XI of a finished gameweek, by actual FPL points.'
+                : view === 'build'
+                  ? 'Change the budget, lock players in, leave others out or fix a formation, and the optimiser re-picks the best predicted squad. See how it compares with the default team and the most-owned template.'
+                  : 'The best-performing XI of a finished gameweek, by actual FPL points.'
         }
       />
 
@@ -186,11 +192,18 @@ export function TeamOfTheWeek() {
           { value: 'review', label: 'Model vs actual' },
           { value: 'actual', label: 'Dream team' },
           { value: 'manager', label: 'ML manager' },
+          { value: 'build', label: 'Build' },
         ]}
       />
 
       <TabPanel idPrefix="totw" value={view} className="pt-5">
-        {view === 'manager' ? (
+        {view === 'build' ? (
+          <TeamBuilder
+            params={params}
+            setParams={(next) => setParams(next)}
+            defaultPoints={team ? team.total_points : null}
+          />
+        ) : view === 'manager' ? (
           <MlManager
             view={manager.data}
             error={manager.isError ? manager.error : undefined}
@@ -214,7 +227,16 @@ export function TeamOfTheWeek() {
         ) : (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
             <div aria-busy={isFetching}>
-              {isLoading || !team ? <PitchSkeleton /> : <TeamPitch starters={team.starters} mode={mode} gameweek={team.gameweek} />}
+              {isLoading || !team ? (
+                <PitchSkeleton />
+              ) : (
+                <>
+                  <div className="mb-2 flex justify-end">
+                    <TeamOfWeekShare team={team} />
+                  </div>
+                  <TeamPitch starters={team.starters} mode={mode} gameweek={team.gameweek} />
+                </>
+              )}
             </div>
 
             <aside className="space-y-4">

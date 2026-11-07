@@ -58,7 +58,13 @@ export function Privacy() {
             <strong>In your browser (local storage), not on our servers:</strong> your assistant settings (language
             model, retrieval method), your trivia score and your privacy choice, and, only if you allow visitor
             counting, the dates of your first visit and of your latest visit. Clearing site data removes them, and
-            declining visitor counting deletes the two dates.
+            declining visitor counting deletes the two dates. Your watchlist of players and your favourite club are kept
+            the same way, only in your browser, and are never sent to us.
+          </li>
+          <li>
+            <strong>The site's own files, in your browser's cache:</strong> a service worker keeps the app's code,
+            club crests and icons so pages you've opened load quickly and work offline, and so the site can be
+            installed as an app. It never stores your data or our API's answers. Clearing site data removes it.
           </li>
           <li>
             <strong>Your assistant conversation, in your browser (session storage):</strong> so it survives reloading
@@ -107,6 +113,13 @@ export function Privacy() {
             <strong>News headlines</strong> come from The Guardian. Our server fetches the headlines; the pictures
             load straight from The Guardian&rsquo;s image server, which can see your IP address, and a headline you
             open takes you to theguardian.com, which has its own privacy policy.
+          </li>
+          <li>
+            <strong>Your FPL team, if you import it on My team:</strong> when you enter a team ID, our server fetches
+            that team's public data from the Fantasy Premier League site, the same data anyone can see there. We use it
+            to show predictions and plan transfers. It isn't stored, apart from a cache of a few minutes. Your browser
+            remembers the ID so you don't have to type it again, and <strong>Forget this ID</strong> on the page clears
+            it. Our server's access logs record the address requested, which contains the ID.
           </li>
           <li>
             <strong>Links to GitHub</strong> take you to GitHub, which has its own privacy policy.

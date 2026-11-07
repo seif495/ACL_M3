@@ -210,6 +210,9 @@ function ShareableCard({ card, children }: { card: AnswerCard; children: ReactNo
       const { toBlob } = await import('html-to-image');
       const blob = await toBlob(node, {
         pixelRatio: 2,
+        // Every photo is /api/images/proxy?url=...: without the query string all of them share
+        // one cache entry and the image repeats the first photo
+        includeQueryParams: true,
         style: { position: 'static', left: 'auto', top: 'auto' }, // the copy sits off-screen
         filter: (el) => !(el instanceof HTMLElement && 'exportHide' in el.dataset),
       });

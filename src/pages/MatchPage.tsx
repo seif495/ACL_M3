@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Radio } from 'lucide-react';
+import { ArrowLeft, Radio } from 'lucide-react';
 import { apiService, handleApiError, isNotFoundError, type MatchGoal, type MatchPageResponse, type MatchPlayer, type MatchSide } from '../services/api';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { usePlayerDialog } from '../hooks/usePlayerDialog';
@@ -231,6 +231,20 @@ export function MatchPage() {
     refetchInterval: (q) => (q.state.data?.status === 'in_progress' ? LIVE_REFRESH_MS : false),
   });
   const m = query.data;
+  // The Fixtures page shows this season only: a match of it links back to its gameweek there.
+  const { data: season } = useQuery({
+    queryKey: ['season-current'],
+    queryFn: () => apiService.getCurrentSeason(),
+    staleTime: 5 * 60_000,
+  });
+  const backTo =
+    m && season && m.season === season.season && m.gameweek != null ? `/fixtures?gw=${m.gameweek}` : '/fixtures';
+  const back = (
+    <Link to={backTo} className="inline-flex items-center gap-1 text-data text-fg-muted hover:text-fg">
+      <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+      {backTo === '/fixtures' ? 'All fixtures' : `Gameweek ${m?.gameweek} fixtures`}
+    </Link>
+  );
   const played = m?.home_score != null && m?.away_score != null;
   usePageMeta({
     title: m ? `${m.home_team} ${played ? `${m.home_score}-${m.away_score}` : 'v'} ${m.away_team}` : 'Match',
@@ -240,6 +254,7 @@ export function MatchPage() {
   if (query.isError) {
     return (
       <Container className="py-10">
+        <div className="mb-4">{back}</div>
         <Card padded={false}>
           {isNotFoundError(query.error) ? (
             <EmptyState title="Match not found" description="This match isn't in the database." action={<Link to="/fixtures" className="text-accent underline">Fixtures</Link>} />
@@ -259,6 +274,7 @@ export function MatchPage() {
     <div className="pb-12">
       <ClubHero home={m?.home_team ?? ''} away={m?.away_team ?? ''} crest={{ home: m ? getClubLogoPath(m.home_team) : null, away: m ? getClubLogoPath(m.away_team) : null }}>
         <Container className="relative py-8 sm:py-12">
+          <div className="mb-4 sm:-mt-4">{back}</div>
           {m ? (
             <>
               <h1 className="sr-only">

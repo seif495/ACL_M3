@@ -4,6 +4,9 @@ import { usePlayerDialog } from '../../hooks/usePlayerDialog';
 import { displayName } from '../../utils/playerNames';
 import { PlayerNameButton } from '../players/PlayerNameButton';
 import { PITCH_LINES } from '../totw/pitchLines';
+import { ShareImageButton } from '../share/ShareImage';
+import { useExportPhoto } from '../share/exportPhoto';
+import { useExport } from '../share/exportContext';
 import { money } from '../totw/mlManagerFormat';
 
 const hint = (p: MyTeamPlayer) => ({
@@ -16,9 +19,11 @@ const hint = (p: MyTeamPlayer) => ({
   chance: p.chance,
 });
 
-/** The suggested XI on the pitch: captain and vice marked, predicted points and opponent per player. */
-export function MyTeamPitch({ squad, lineup }: { squad: MyTeamPlayer[]; lineup: MyTeamLineup }) {
+function XiPitch({ squad, lineup }: { squad: MyTeamPlayer[]; lineup: MyTeamLineup }) {
   const dialog = usePlayerDialog();
+  // In the shared image: photos through the proxy, no click targets
+  const { exporting } = useExport();
+  const photoOf = useExportPhoto();
   const byElement = new Map(squad.map((p) => [p.element, p]));
   const starters = lineup.starters.flatMap((e) => byElement.get(e) ?? []);
 
@@ -35,20 +40,61 @@ export function MyTeamPitch({ squad, lineup }: { squad: MyTeamPlayer[]; lineup: 
                 // Name plates use FPL's short name, as on the other pitches
                 displayName={p.web_name ?? undefined}
                 team={p.team}
-                photo={p.photo}
+                photo={photoOf(p.photo)}
                 opponents={p.opponents}
                 captain={p.element === lineup.captain}
                 viceCaptain={p.element === lineup.vice_captain}
                 status={p.status}
                 statusNote={p.news}
                 value={p.predicted_points != null ? `${p.predicted_points.toFixed(1)} pts` : '–'}
-                onClick={dialog ? () => dialog.openPlayer(hint(p)) : undefined}
+                onClick={dialog && !exporting ? () => dialog.openPlayer(hint(p)) : undefined}
                 actionLabel={`${p.name}: show stats`}
               />
             ))}
         </PitchRow>
       ))}
     </Pitch>
+  );
+}
+
+/**
+ * The suggested XI on the pitch: captain and vice marked, predicted points and opponent per player,
+ * with a "Share image" button. `gameweek` and `teamName` only improve the image's title and file name.
+ */
+export function MyTeamPitch({
+  squad,
+  lineup,
+  gameweek,
+  teamName,
+}: {
+  squad: MyTeamPlayer[];
+  lineup: MyTeamLineup;
+  gameweek?: number;
+  teamName?: string;
+}) {
+  const captain = squad.find((p) => p.element === lineup.captain);
+  return (
+    <div>
+      <div className="mb-2 flex justify-end">
+        <ShareImageButton
+          title={`Suggested team${gameweek ? `, GW${gameweek}` : ''}`}
+          eyebrow={teamName ? `${teamName} · My team` : 'My team'}
+          subtitle={[
+            lineup.formation,
+            `${lineup.projected_points.toFixed(1)} projected points`,
+            captain ? `captain ${captain.web_name || captain.name}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+          fileName={`pitch-me-my-team${gameweek ? `-gw${gameweek}` : ''}`}
+          shareText={`The XI our model suggests for my FPL team${gameweek ? ` in gameweek ${gameweek}` : ''}.`}
+          url="/my-team"
+        >
+          <XiPitch squad={squad} lineup={lineup} />
+        </ShareImageButton>
+      </div>
+      <XiPitch squad={squad} lineup={lineup} />
+    </div>
   );
 }
 

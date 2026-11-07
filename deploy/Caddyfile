@@ -2,7 +2,7 @@
 # previews for social apps). Keep it in sync with App.tsx and SITEMAP_ROUTES in vite.config.ts;
 # tests/test_seo.py checks services/seo.py describes every page here.
 (page_routes) {
-	path / /fixtures /table /teams /teams/* /matches/* /my-team /team-of-the-week /players /predictions /model /assistant /compare /trivia /settings /privacy /terms /contact /stats /design /qa /search
+	path / /fixtures /table /teams /teams/* /matches/* /players/* /my-team /team-of-the-week /players /predictions /insights /gameweek /gameweek/* /glossary /model /assistant /compare /trivia /settings /privacy /terms /contact /stats /design /qa /search
 }
 
 # SITE_ADDRESS is a hostname (e.g. 1-2-3-4.sslip.io or fpl.example.com).

@@ -4,20 +4,42 @@
     {
       "name": "frontend-live",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:live"],
+      "runtimeArgs": [
+        "run",
+        "dev:live"
+      ],
       "port": 3000
     },
     {
       "name": "backend",
       "runtimeExecutable": ".venv/Scripts/uvicorn.exe",
-      "runtimeArgs": ["api_main:app", "--port", "8000"],
+      "runtimeArgs": [
+        "api_main:app",
+        "--port",
+        "8000"
+      ],
       "port": 8000
     },
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 3000
+    },
+    {
+      "name": "frontend-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "preview",
+        "--port",
+        "4173",
+        "--strictPort"
+      ],
+      "port": 4173
     }
   ]
 }

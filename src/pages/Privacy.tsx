@@ -58,7 +58,13 @@ export function Privacy() {
             <strong>In your browser (local storage), not on our servers:</strong> your assistant settings (language
             model, retrieval method), your trivia score and your privacy choice, and, only if you allow visitor
             counting, the dates of your first visit and of your latest visit. Clearing site data removes them, and
-            declining visitor counting deletes the two dates.
+            declining visitor counting deletes the two dates. Your watchlist of players and your favourite club are kept
+            the same way, only in your browser, and are never sent to us.
+          </li>
+          <li>
+            <strong>The site's own files, in your browser's cache:</strong> a service worker keeps the app's code,
+            club crests and icons so pages you've opened load quickly and work offline, and so the site can be
+            installed as an app. It never stores your data or our API's answers. Clearing site data removes it.
           </li>
           <li>
             <strong>Your assistant conversation, in your browser (session storage):</strong> so it survives reloading

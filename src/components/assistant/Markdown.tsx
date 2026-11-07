@@ -1,4 +1,5 @@
 import ReactMarkdown, { type Components } from 'react-markdown';
+import { Link } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 
 // Assistant answers are LLM markdown. Each element is mapped to token-styled markup so the
@@ -27,6 +28,17 @@ const COMPONENTS: Components = {
   strong: ({ node: _n, className, ...rest }) => <strong className={cn('font-semibold text-fg', className)} {...rest} />,
   a: ({ node: _n, className, href, ...rest }) => {
     const external = !!href && /^https?:\/\//i.test(href);
+    // Site pages (e.g. the My team hint) stay in the app instead of reloading it
+    if (href && /^\/(?!\/)/.test(href)) {
+      return (
+        <Link
+          to={href}
+          className={cn('font-medium text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent', className)}
+        >
+          {rest.children}
+        </Link>
+      );
+    }
     return (
       <a
         href={href}

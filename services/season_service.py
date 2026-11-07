@@ -414,6 +414,18 @@ def predicted_selection(rows: Iterable[Dict[str, Any]],
     """The predicted team of the week from prediction rows: (selection, details by name).
     Shared with pipeline.predict_next_gw, which saves it as the gameweek's pick, so the
     saved squad is the one the page showed. NotFoundError when no squad fits."""
+    pool, details = predicted_pool(rows, opponents, codes)
+    try:
+        return opt.best_squad(pool, budget=BUDGET), details
+    except opt.InfeasibleError as exc:
+        raise NotFoundError(f"Not enough available players for a squad: {exc}") from exc
+
+
+def predicted_pool(rows: Iterable[Dict[str, Any]],
+                   opponents: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+                   codes: Optional[Dict[int, int]] = None) -> Tuple[List[opt.Candidate], Dict[str, Dict[str, Any]]]:
+    """The optimiser's candidates from prediction rows, with the per-player details
+    (predicted_selection's input; services/team_builder solves it with its own constraints)."""
     opponents, codes = opponents or {}, codes or {}
     pool, details = [], {}
     for r in predicted_candidates(rows):
@@ -437,10 +449,7 @@ def predicted_selection(rows: Iterable[Dict[str, Any]],
             "element": _int_or_none(r.get("element")),
             "_code": codes.get(_int_or_none(r.get("element"))),
         }
-    try:
-        return opt.best_squad(pool, budget=BUDGET), details
-    except opt.InfeasibleError as exc:
-        raise NotFoundError(f"Not enough available players for a squad: {exc}") from exc
+    return pool, details
 
 
 def opponents_from_prediction(row: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -687,6 +696,59 @@ def load_fixtures(conn, season: str = CURRENT_SEASON) -> List[Dict[str, Any]]:
 
 def get_season_current(conn, season: str = CURRENT_SEASON) -> Dict[str, Any]:
     return summarize_season(load_fixtures(conn, season), read_meta(season), season)
+
+
+TICKER_MAX_GAMEWEEKS = 10
+
+
+def fixture_ticker(fixtures: Iterable[Dict[str, Any]], start: int, count: int) -> Dict[str, Any]:
+    """Every club's fixtures for `count` gameweeks from `start`, with FPL's difficulty (1-5) from
+    the club's side, easiest run first. A blank gameweek has no items, a double two. Clubs are
+    ranked by their average difficulty over the fixtures they play, then by more fixtures (a
+    double gameweek is worth more than a blank), then by name. Pure."""
+    gws = list(range(int(start), int(start) + int(count)))
+    clubs: Dict[str, Dict[int, List[Dict[str, Any]]]] = {}
+    for f in fixtures:
+        gw = f.get("gameweek")
+        for side, other, home in (("home_team", "away_team", True), ("away_team", "home_team", False)):
+            clubs.setdefault(f[side], {})
+            if gw in gws:
+                clubs[f[side]].setdefault(gw, []).append({
+                    "fixture_id": f["id"], "opponent": f[other], "home": home,
+                    "difficulty": f["home_difficulty"] if home else f["away_difficulty"],
+                    "kickoff_time": f.get("kickoff_time"),
+                })
+    rows = []
+    for team, by_gw in clubs.items():
+        items = [i for gw in gws for i in by_gw.get(gw, [])]
+        known = [i["difficulty"] for i in items if i["difficulty"] is not None]
+        rows.append({
+            "team": team,
+            "gameweeks": [{"gameweek": gw, "fixtures": by_gw.get(gw, [])} for gw in gws],
+            "fixtures": len(items),
+            "total_difficulty": sum(known),
+            "average_difficulty": round(sum(known) / len(known), 2) if known else None,
+        })
+    rows.sort(key=lambda r: (r["average_difficulty"] if r["average_difficulty"] is not None else 99,
+                             -r["fixtures"], r["team"]))
+    return {"from_gameweek": int(start), "gameweeks": gws, "clubs": rows}
+
+
+def get_fixture_ticker(conn, gameweeks: int = 6, start: Optional[int] = None,
+                       season: str = CURRENT_SEASON) -> Dict[str, Any]:
+    """The fixture difficulty ticker from the next gameweek (or `start`) for `gameweeks` weeks,
+    cut at the season's last gameweek. Unknown start -> NotFoundError."""
+    fixtures = load_fixtures(conn, season)
+    all_gws = gameweeks_of(fixtures)
+    if not all_gws:
+        raise NotFoundError(f"No {season} fixtures yet")
+    if start is None:
+        summary = summarize_season(fixtures, read_meta(season), season)
+        start = summary.get("next_gameweek") or default_gameweek(summary, all_gws)
+    if start not in all_gws:
+        raise NotFoundError(f"No {season} fixtures for gameweek {start}")
+    count = max(1, min(int(gameweeks), TICKER_MAX_GAMEWEEKS, all_gws[-1] - int(start) + 1))
+    return {"season": season, **fixture_ticker(fixtures, int(start), count)}
 
 
 def get_fixtures(conn, gameweek: Optional[int] = None, season: str = CURRENT_SEASON) -> Dict[str, Any]:

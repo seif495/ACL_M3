@@ -43,6 +43,28 @@ class InfeasibleError(ValueError):
     """The pool can't fill a valid team under the constraints."""
 
 
+class SolveTimeLimit(InfeasibleError):
+    """The solver hit its time limit before finding any valid squad."""
+
+
+# XI shapes (DEF-MID-FWD) a request can fix in best_squad; None leaves the choice to the solver.
+# parse_formation accepts any valid FPL formation, so this is only the list the site offers.
+FORMATIONS: Tuple[str, ...] = ("3-4-3", "3-5-2", "4-4-2", "4-3-3", "4-5-1", "5-3-2", "5-4-1")
+
+
+def parse_formation(text: str) -> Dict[str, int]:
+    """"4-4-2" -> {"GK": 1, "DEF": 4, "MID": 4, "FWD": 2}. ValueError when it isn't a valid
+    FPL formation (3-5 DEF, 2-5 MID, 1-3 FWD, ten outfield players)."""
+    try:
+        d, m, f = (int(x) for x in str(text).strip().split("-"))
+    except ValueError:
+        raise ValueError(f"Unknown formation {text!r}") from None
+    counts = {"GK": 1, "DEF": d, "MID": m, "FWD": f}
+    if sum(counts.values()) != XI_SIZE or any(not XI_MIN[p] <= counts[p] <= XI_MAX[p] for p in POSITIONS):
+        raise ValueError(f"Unknown formation {text!r}")
+    return counts
+
+
 @dataclass(frozen=True)
 class Candidate:
     id: str            # unique key (player name)
@@ -60,6 +82,7 @@ class Selection:
     bench: List[Candidate]             # GK first, then outfield by points desc
     captain: Candidate
     vice_captain: Optional[Candidate]
+    optimal: bool = True               # False when best_squad's time limit stopped the search early
 
     @property
     def formation(self) -> str:
@@ -168,7 +191,8 @@ def best_xi(pool: Iterable[Candidate]) -> Selection:
 
 def best_squad(pool: Iterable[Candidate], budget: int = DEFAULT_BUDGET,
                max_per_club: int = DEFAULT_MAX_PER_CLUB,
-               time_limit: float = 20.0) -> Selection:
+               time_limit: float = 20.0, locked: Iterable[str] = (),
+               excluded: Iterable[str] = (), formation: Optional[str] = None) -> Selection:
     """Best 15-man squad within budget/club limits, by expected points: XI + captain
     + bench weighted by BENCH_WEIGHTS / BENCH_GK_WEIGHT.
 
@@ -176,15 +200,30 @@ def best_squad(pool: Iterable[Candidate], budget: int = DEFAULT_BUDGET,
     then chooses the armband over the chosen XI, including the vice-captain cover when
     the captain may not play, so its bonus is never below what the solver assumed.
 
-    Raises InfeasibleError when no valid squad exists.
+    `locked` ids must be in the squad (they may start or sit on the bench), `excluded` ids
+    are dropped from the pool, and `formation` ("4-4-2") fixes the XI's DEF/MID/FWD counts
+    (the bench weights stay as above). All three default to nothing.
+
+    Raises InfeasibleError when no valid squad exists (SolveTimeLimit when the solver ran
+    out of time first); ValueError for an unknown formation.
     """
     import numpy as np
-    from scipy.optimize import Bounds, LinearConstraint, milp
+    from scipy.optimize import Bounds, LinearConstraint
+    from services.milp_runner import milp                  # one solver thread (HiGHS hangs across threads)
     from scipy.sparse import lil_matrix
 
+    locked_ids, excluded_ids = set(locked), set(excluded)
+    xi_counts = parse_formation(formation) if formation else None
+    both = sorted(locked_ids & excluded_ids)
+    if both:
+        raise InfeasibleError(f"{', '.join(both)} can't be both locked and excluded")
+    pool = [c for c in pool if c.id not in excluded_ids]
     pool = sorted(pool, key=lambda c: (POSITIONS.index(c.position) if c.position in POSITIONS else 9,
                                        -c.points, c.cost, c.id))
     _check_positions(pool)
+    missing = sorted(locked_ids - {c.id for c in pool})
+    if missing:
+        raise InfeasibleError(f"Locked player(s) not in the pool: {', '.join(missing)}")
     for p in POSITIONS:
         have = sum(c.position == p for c in pool)
         if have < SQUAD_SIZE[p]:
@@ -207,7 +246,8 @@ def best_squad(pool: Iterable[Candidate], budget: int = DEFAULT_BUDGET,
     for p in POSITIONS:
         idx = [i for i, c in enumerate(pool) if c.position == p]
         rows.append(({X + i: 1.0 for i in idx}, SQUAD_SIZE[p], SQUAD_SIZE[p]))
-        rows.append(({S + i: 1.0 for i in idx}, XI_MIN[p], XI_MAX[p]))
+        lo, hi = (xi_counts[p], xi_counts[p]) if xi_counts else (XI_MIN[p], XI_MAX[p])
+        rows.append(({S + i: 1.0 for i in idx}, lo, hi))
     rows.append(({S + i: 1.0 for i in range(n)}, XI_SIZE, XI_SIZE))
     for var in (K, F, G):
         rows.append(({var + i: 1.0 for i in range(n)}, 1.0, 1.0))
@@ -236,10 +276,16 @@ def best_squad(pool: Iterable[Candidate], budget: int = DEFAULT_BUDGET,
     upper = np.ones(5 * n)
     upper[F:F + n][is_gk] = 0                              # subs 1 and 2 are outfielders
     upper[G:G + n][is_gk] = 0
+    lower = np.zeros(5 * n)
+    for i, c in enumerate(pool):
+        if c.id in locked_ids:
+            lower[X + i] = 1                               # in the squad (starting or on the bench)
     res = milp(-gain, constraints=LinearConstraint(a.tocsr(), lb, ub),
-               integrality=np.ones(5 * n), bounds=Bounds(0, upper),
+               integrality=np.ones(5 * n), bounds=Bounds(lower, upper),
                options={"mip_rel_gap": 0.0, "time_limit": time_limit, "presolve": True})
     if res.x is None:
+        if res.status == 1:                                # iteration or time limit
+            raise SolveTimeLimit(f"No valid squad found in {time_limit:g}s: {res.message}")
         raise InfeasibleError(f"No valid squad: {res.message}")
 
     x = np.round(res.x[X:X + n]).astype(int)
@@ -247,7 +293,8 @@ def best_squad(pool: Iterable[Candidate], budget: int = DEFAULT_BUDGET,
     starters = order_starters(pool[i] for i in range(n) if s[i])
     bench = order_bench(pool[i] for i in range(n) if x[i] and not s[i])
     captain, vice = pick_captains(starters)
-    return Selection(starters=starters, bench=bench, captain=captain, vice_captain=vice)
+    return Selection(starters=starters, bench=bench, captain=captain, vice_captain=vice,
+                     optimal=res.status == 0)
 
 
 # ------------------------------------------------------------------ validation

@@ -1,16 +1,7 @@
 import axios, { AxiosError } from 'axios';
+import { API_BASE_URL, createApiClient } from './http';
 
-// Production builds use relative URLs: the site and the API share an origin
-// (Caddy serves dist/ and proxies /api, /health and /ws — see deploy/Caddyfile).
-const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : (import.meta.env.VITE_API_URL || '');
-
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 60000, // 60 seconds
-});
+const api = createApiClient();
 
 const EMBEDDINGS_BUILD_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -454,11 +445,18 @@ export interface MLPrediction {
   chance_of_playing_next_round?: number | null;
   /** Official FPL team news, e.g. "Hamstring injury - Expected back 24 Oct" */
   news?: string;
+  /** Next gameweeks' projected points (only with `horizon` > 1 and projections available). */
+  projected?: { gameweek: number; points: number }[];
+  projected_total?: number;
 }
 
 export interface TopPerformersResponse {
   predictions: MLPrediction[];
-  metadata: Record<string, unknown>;
+  metadata: Record<string, unknown> & {
+    /** Gameweeks actually used: 1 when projections weren't available. */
+    horizon?: number;
+    horizon_gameweeks?: number[];
+  };
 }
 
 export interface BestValueResponse {
@@ -512,6 +510,32 @@ export interface FixturesResponse {
   gameweek: number;
   gameweeks: number[];
   fixtures: SeasonFixture[];
+}
+
+export interface TickerFixture {
+  fixture_id: string;
+  opponent: string;
+  home: boolean;
+  /** FPL's 1 (easy) to 5 (hard) from this club's side. */
+  difficulty: number | null;
+  kickoff_time: string | null;
+}
+
+export interface TickerClub {
+  team: string;
+  fixtures: number;
+  total_difficulty: number;
+  average_difficulty: number | null;
+  /** One entry per gameweek; empty `fixtures` is a blank, two is a double. */
+  gameweeks: { gameweek: number; fixtures: TickerFixture[] }[];
+}
+
+export interface FixtureTickerResponse {
+  season: string;
+  from_gameweek: number;
+  gameweeks: number[];
+  /** Easiest run first. */
+  clubs: TickerClub[];
 }
 
 export interface TableRow {
@@ -1346,11 +1370,12 @@ export const apiService = {
     position?: string,
     topK: number = 10,
     filters: PredictionFilters = {},
+    horizon: number = 1,
   ): Promise<TopPerformersResponse> {
     // Try GET endpoint first (faster, uses CSV), fallback to POST (uses Neo4j + ML)
     try {
       const { data } = await api.get<TopPerformersResponse>('/api/ml/top-performers', {
-        params: { position, limit: topK, ...filters },
+        params: { position, limit: topK, ...filters, horizon: horizon > 1 ? horizon : undefined },
         timeout: 5000,
       });
       return data;
@@ -1559,6 +1584,11 @@ export const apiService = {
 
   async getFixtures(gameweek?: number): Promise<FixturesResponse> {
     const { data } = await api.get<FixturesResponse>('/api/fixtures', { params: gameweek ? { gameweek } : undefined });
+    return data;
+  },
+
+  async getFixtureTicker(gameweeks: number = 6, start?: number): Promise<FixtureTickerResponse> {
+    const { data } = await api.get<FixtureTickerResponse>('/api/fixtures/ticker', { params: { gameweeks, start } });
     return data;
   },
 

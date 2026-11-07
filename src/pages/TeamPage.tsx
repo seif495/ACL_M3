@@ -9,9 +9,12 @@ import { clubColors } from '../utils/clubColors';
 import { cn } from '../utils/cn';
 import { PLAYER_SEASONS } from '../components/players/seasons';
 import { ClubHero } from '../components/teams/ClubHero';
+import { FavouriteClubButton } from '../components/teams/FavouriteClubButton';
 import { FormChips, MatchList } from '../components/teams/MatchBits';
 import { PositionChart } from '../components/teams/PositionChart';
 import { NewsSection } from '../components/news/NewsSection';
+import { ClubSetPiecesCard } from '../components/insights/ClubSetPiecesCard';
+import { insightsApi } from '../services/insightsApi';
 import {
   Card,
   ClubCrest,
@@ -81,6 +84,19 @@ function Leaders({ title, unit, items, team }: { title: string; unit: string; it
       )}
     </Card>
   );
+}
+
+/** The club's penalty, free-kick and corner takers (current squad only). */
+function SetPieceTakers({ team }: { team: string }) {
+  const { data } = useQuery({
+    queryKey: ['insights', 'set-pieces', team],
+    queryFn: () => insightsApi.setPieces(team),
+    staleTime: 15 * 60_000,
+    retry: 0,
+  });
+  const club = data?.teams.find((c) => c.team === team);
+  if (!club) return null;
+  return <ClubSetPiecesCard club={club} title="Set-piece takers" showCrest={false} />;
 }
 
 function SquadTable({ squad, team, current }: { squad: TeamSquadPlayer[]; team: string; current: boolean }) {
@@ -203,6 +219,9 @@ export function TeamPage() {
                     <span className="text-micro font-semibold uppercase text-fg-subtle">Form</span>
                     <FormChips items={t.form.map((m) => ({ fixture_id: m.fixture_id, result: m.result!, opponent: m.opponent, home: m.home, score: m.score }))} />
                   </div>
+                  <div className="mt-3">
+                    <FavouriteClubButton team={t.team} />
+                  </div>
                 </div>
               </div>
               <div className="flex flex-col gap-3 md:items-end">
@@ -292,7 +311,10 @@ export function TeamPage() {
             </div>
           ) : tab === 'squad' ? (
             t.squad.length ? (
-              <SquadTable squad={t.squad} team={t.team} current={current} />
+              <div className="space-y-4">
+                {current && <SetPieceTakers team={t.team} />}
+                <SquadTable squad={t.squad} team={t.team} current={current} />
+              </div>
             ) : (
               <EmptyState title="No squad listed" description="No players for this club and season." />
             )

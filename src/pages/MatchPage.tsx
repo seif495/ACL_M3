@@ -9,6 +9,7 @@ import { clubColors, matchPath, teamPath } from '../utils/clubColors';
 import { cn } from '../utils/cn';
 import { ClubHero } from '../components/teams/ClubHero';
 import { FormChips } from '../components/teams/MatchBits';
+import { MatchForecastCard } from '../components/forecast/MatchForecastCard';
 import { Card, ClubCrest, Container, EmptyState, ErrorState, PlayerAvatar, PositionBadge, SectionHeading, Skeleton } from '../components/ui';
 
 const LIVE_REFRESH_MS = 60_000;
@@ -164,6 +165,7 @@ function Preview({ m }: { m: MatchPageResponse }) {
   const hasPredicted = m.predicted.home.length + m.predicted.away.length > 0;
   return (
     <div className="space-y-6">
+      {m.status === 'scheduled' && <MatchForecastCard fixtureId={m.id} />}
       {hasPredicted && (
         <section>
           <SectionHeading as="h2" size="md" title="Players to watch" subtitle="The model's top predicted players for this match" />

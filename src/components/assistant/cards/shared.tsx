@@ -35,6 +35,7 @@ import { Card, Chip, ClubCrest, FdrBadge, Logo, PositionBadge, StatusBadge } fro
 import { usePlayerAvatars } from '../../../hooks/usePlayerAvatars';
 import { getClubAbbreviation } from '../../../utils/clubLogos';
 import { cn } from '../../../utils/cn';
+import { useExport } from '../../share/exportContext';
 
 export const CARD_ICONS: Record<CardIcon, LucideIcon> = {
   trophy: Trophy,
@@ -111,27 +112,8 @@ export function PhotoLookupProvider({ enabled, children }: { enabled: boolean; c
 
 // --- Sharing a card as an image ------------------------------------------------------------
 
-export type ShareState = 'idle' | 'working' | 'ready' | 'failed';
-
-interface ExportContextValue {
-  /** This copy of the card is being drawn into an image: photos load through our proxy,
-      links and buttons give way to the Pitch Me mark. */
-  exporting: boolean;
-  share?: () => void;
-  shareState?: ShareState;
-  /** 'share' opens the device's share sheet (phones); 'save' downloads a PNG. */
-  shareMode?: 'share' | 'save';
-}
-
-const ExportContext = createContext<ExportContextValue>({ exporting: false });
-
-export function ExportProvider({ value, children }: { value: ExportContextValue; children: ReactNode }) {
-  return <ExportContext.Provider value={value}>{children}</ExportContext.Provider>;
-}
-
-export function useExport(): ExportContextValue {
-  return useContext(ExportContext);
-}
+export { ExportProvider, useExport } from '../../share/exportContext';
+export type { ShareState } from '../../share/exportContext';
 
 /** Other hosts' photos via our image proxy, so the image's canvas isn't tainted by them. */
 function sameOrigin(url: string | null | undefined): string | null | undefined {
@@ -150,7 +132,7 @@ function sameOrigin(url: string | null | undefined): string | null | undefined {
  */
 export function useCardPhotos(players: CardPlayer[]): (player: CardPlayer) => string | null | undefined {
   const enabled = useContext(PhotoLookupContext);
-  const { exporting } = useContext(ExportContext);
+  const { exporting } = useExport();
   const missing = enabled ? players.filter((p) => !p.photo).map((p) => p.name) : [];
   const looked = usePlayerAvatars(missing);
   return (player) => {

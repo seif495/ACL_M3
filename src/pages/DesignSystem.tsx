@@ -42,7 +42,8 @@ import { PlayerExplainer } from '../components/explain/PlayerExplainer';
 import { FeatureEffects } from '../components/explain/FeatureEffects';
 import { PlayerChips, PlayerSearchBox } from '../components/explain/PlayerPicker';
 import { ExplainError, ExplainUnavailable } from '../components/explain/ExplainStates';
-import { SAMPLE_DEPENDENCE, SAMPLE_NOT_FOUND_ERROR, SAMPLE_PLAYER_EXPLANATION, SAMPLE_SUMMARY } from '../components/explain/samples';
+import { TrackRecordEmpty, TrackRecordView } from '../components/explain/TrackRecord';
+import { SAMPLE_DEPENDENCE, SAMPLE_NOT_FOUND_ERROR, SAMPLE_PLAYER_EXPLANATION, SAMPLE_SUMMARY, SAMPLE_TRACK_RECORD } from '../components/explain/samples';
 
 /*
  * Hidden /design route: a living reference for the Pitch Me design system.
@@ -385,6 +386,12 @@ export function DesignSystem() {
               ) : undefined
             }
           />
+
+          <p className="mb-2 mt-10 text-micro font-semibold uppercase text-fg-subtle">Track record</p>
+          <TrackRecordView data={SAMPLE_TRACK_RECORD} />
+          <div className="mt-4">
+            <TrackRecordEmpty />
+          </div>
 
           <p className="mb-2 mt-10 text-micro font-semibold uppercase text-fg-subtle">States</p>
           <div className="grid gap-4 md:grid-cols-2">

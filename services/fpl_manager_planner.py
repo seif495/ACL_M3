@@ -328,7 +328,8 @@ class _Milp:
         self.rows += 1
 
     def solve(self, time_limit: float):
-        from scipy.optimize import Bounds, LinearConstraint, milp
+        from scipy.optimize import Bounds, LinearConstraint
+        from services.milp_runner import milp              # one solver thread (HiGHS hangs across threads)
         from scipy.sparse import coo_matrix
 
         a = coo_matrix((np.concatenate(self._v), (np.concatenate(self._r), np.concatenate(self._c))),

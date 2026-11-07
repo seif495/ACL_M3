@@ -56,6 +56,16 @@ export function SiteFooter() {
               </li>
             ))}
             <li>
+              {/* Calendar apps subscribe to webcal:// and refresh it; the https link is the plain download */}
+              <a href={`webcal://${typeof window !== 'undefined' ? window.location.host : ''}/api/calendar/deadlines.ics`} className="text-fg-muted hover:text-fg">
+                Add deadlines to your calendar
+              </a>
+              <span className="text-fg-subtle"> · </span>
+              <a href="/api/calendar/deadlines.ics" download="pitchme-deadlines.ics" className="text-fg-subtle hover:text-fg">
+                .ics
+              </a>
+            </li>
+            <li>
               {/* Reopens the consent banner so the choice can be changed at any time */}
               <button type="button" onClick={() => setConsent(null)} className="text-fg-muted hover:text-fg">
                 Privacy choices

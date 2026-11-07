@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import type { Message } from '../../store/appStore';
+import type { AssistantMessage } from '../../services/assistantApi';
 import { Markdown } from './Markdown';
 import { AnswerCards, AnswerCardSkeleton, FollowUps } from './cards/AnswerCards';
 import { Logo } from '../ui';
@@ -50,6 +51,7 @@ export function ChatMessage({ message, onAsk, askDisabled, showFollowUps = false
   const isError = !isUser && message.content.startsWith('Error:');
   const cards = (!isError && message.cards) || [];
   const streaming = !!message.streaming;
+  const sources = (!isError && !streaming && (message as AssistantMessage).sources) || [];
 
   return (
     <motion.li
@@ -96,6 +98,11 @@ export function ChatMessage({ message, onAsk, askDisabled, showFollowUps = false
                   </div>
                 ) : (
                   streaming && <Working label="Writing the answer…" />
+                )}
+                {message.content && sources.length > 0 && (
+                  <p className="mt-1.5 px-1 text-micro text-fg-subtle">
+                    <span className="font-semibold">Based on:</span> {sources.join(' · ')}
+                  </p>
                 )}
               </>
             )}

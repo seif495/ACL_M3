@@ -354,7 +354,7 @@ def load_projections() -> Optional[pd.DataFrame]:
     return ss._cached(("my_team_projections", path, ss._mtime(path)), lambda: pd.read_csv(path))
 
 
-def _projected_by_element(proj: Optional[pd.DataFrame], first_gw: Optional[int], horizon: int
+def projected_by_element(proj: Optional[pd.DataFrame], first_gw: Optional[int], horizon: int
                           ) -> Dict[int, List[Dict[str, Any]]]:
     """{element: [{gameweek, points}]} for the next `horizon` gameweeks of projections.csv, used
     only when it comes from the same run as the predictions: it starts at their gameweek (an
@@ -418,7 +418,7 @@ def build_team(raw: Dict[str, Any], players: Dict[int, PlayerInfo], predictions:
     paid = purchase_prices(squad, transfers, free_hit_gameweeks(chips), start_prices, now_costs)
 
     pred, pred_gw = _predictions_by_element(predictions)
-    projected = _projected_by_element(projections, pred_gw, horizon)
+    projected = projected_by_element(projections, pred_gw, horizon)
     rows: List[Dict[str, Any]] = []
     for el in squad:
         info = players.get(el)

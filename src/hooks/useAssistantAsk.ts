@@ -1,5 +1,14 @@
 import { useCallback } from 'react';
-import { apiService, handleApiError, StreamUnavailableError, type QueryResponse } from '../services/api';
+import { handleApiError, StreamUnavailableError } from '../services/api';
+import {
+  queryAssistant,
+  RateLimitedError,
+  streamAssistant,
+  type AssistantMessage,
+  type AssistantResponse,
+  type RateInfo,
+} from '../services/assistantApi';
+import { readSavedTeamId } from '../components/myteam/format';
 import { useAppStore, type Message } from '../store/appStore';
 
 // One answer streams at a time. Kept outside React so Clear chat can stop it even after the
@@ -14,8 +23,12 @@ export function abortAnswer() {
 }
 
 interface AskOptions {
-  onDone?: (response: QueryResponse) => void;
+  onDone?: (response: AssistantResponse) => void;
   onError?: (message: string) => void;
+  /** Questions left (from the rate-limit headers), after every answer that reports it. */
+  onRate?: (rate: RateInfo) => void;
+  /** A 429: how long to wait, in seconds (null when the server didn't say). */
+  onRateLimited?: (retryAfter: number | null) => void;
 }
 
 /**
@@ -23,7 +36,7 @@ interface AskOptions {
  * backend has them), then the text piece by piece (one store update per animation frame), then
  * the final response. Falls back to POST /api/query when the backend has no stream endpoint.
  */
-export function useAssistantAsk({ onDone, onError }: AskOptions = {}) {
+export function useAssistantAsk({ onDone, onError, onRate, onRateLimited }: AskOptions = {}) {
   return useCallback(
     async (question: string) => {
       const store = useAppStore.getState();
@@ -33,20 +46,28 @@ export function useAssistantAsk({ onDone, onError }: AskOptions = {}) {
       store.addMessage({ role: 'user', content: question, timestamp: Date.now() });
       store.addMessage({ id, role: 'assistant', content: '', timestamp: Date.now(), streaming: true, cards: [], followUps: [] });
 
-      const update = (patch: Partial<Message>) => useAppStore.getState().updateMessage(id, patch);
+      // `sources` isn't in the store's Message type; the store merges the patch as given
+      const update = (patch: Partial<AssistantMessage>) => useAppStore.getState().updateMessage(id, patch as Partial<Message>);
       const controller = new AbortController();
       inflight = controller;
       let text = '';
       let frame = 0;
       let finished = false;
-      const finish = (response: QueryResponse) => {
+      const finish = (response: AssistantResponse) => {
         finished = true;
         cancelAnimationFrame(frame);
-        update({ content: response.answer, cards: response.cards ?? [], followUps: response.follow_ups ?? [], streaming: false });
+        update({
+          content: response.answer,
+          cards: response.cards ?? [],
+          followUps: response.follow_ups ?? [],
+          sources: response.sources ?? [],
+          streaming: false,
+        });
         onDone?.(response);
       };
 
       try {
+        const teamId = readSavedTeamId();
         const body = {
           question,
           model: store.selectedModel,
@@ -54,14 +75,16 @@ export function useAssistantAsk({ onDone, onError }: AskOptions = {}) {
           embedding_model: store.embeddingModel,
           is_first_message: history.length === 0,
           chat_history: history,
+          ...(teamId ? { fpl_team_id: teamId } : {}),
         };
+        let rate: RateInfo | null = null;
         try {
-          await apiService.streamQuery(
+          rate = await streamAssistant(
             body,
             (event) => {
               switch (event.event) {
                 case 'cards':
-                  update({ cards: event.data.cards, followUps: event.data.follow_ups });
+                  update({ cards: event.data.cards, followUps: event.data.follow_ups, sources: event.data.sources ?? [] });
                   break;
                 case 'delta':
                   text += event.data.text;
@@ -86,14 +109,16 @@ export function useAssistantAsk({ onDone, onError }: AskOptions = {}) {
           );
         } catch (err) {
           if (!(err instanceof StreamUnavailableError)) throw err;
-          finish(
-            await apiService.queryFPL(question, body.model, body.retrieval_method, body.embedding_model, body.is_first_message, history),
-          );
+          const fallback = await queryAssistant(body, controller.signal);
+          rate = fallback.rate;
+          finish(fallback.response);
         }
+        if (rate) onRate?.(rate);
         if (!finished) throw new Error('The answer was interrupted. Please try again.');
       } catch (err) {
         if (controller.signal.aborted) return; // Clear chat: the message is gone anyway
         cancelAnimationFrame(frame);
+        if (err instanceof RateLimitedError) onRateLimited?.(err.retryAfter);
         const message = handleApiError(err);
         update({ content: `Error: ${message}`, streaming: false, cards: [], followUps: [] });
         onError?.(message);
@@ -101,6 +126,6 @@ export function useAssistantAsk({ onDone, onError }: AskOptions = {}) {
         if (inflight === controller) inflight = null;
       }
     },
-    [onDone, onError],
+    [onDone, onError, onRate, onRateLimited],
   );
 }

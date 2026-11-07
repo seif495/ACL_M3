@@ -18,6 +18,7 @@ import {
   StatusBadge,
 } from '../ui';
 import { PointsTimeline } from './PointsTimeline';
+import { PlayerShare } from './PlayerShare';
 import { ALL_SEASONS, PLAYER_SEASONS } from './seasons';
 
 
@@ -168,6 +169,8 @@ interface PlayerProfileViewProps {
   initialSeason?: string;
   /** Left of the season picker, e.g. a Back button. */
   toolbar?: ReactNode;
+  /** Called when the person picks another season (the player page keeps it in the URL). */
+  onSeasonChange?: (season: string) => void;
   /** Narrower layout for the overlay. */
   compact?: boolean;
   /** Heading level of the player's name (h2 on a page, h2 in the dialog too). */
@@ -176,7 +179,7 @@ interface PlayerProfileViewProps {
 
 /** A player's season (or career): header, key numbers, points by gameweek, where the points came
  * from and every stat FPL has, with per-90 rates. Used by /players and the player overlay. */
-export function PlayerProfileView({ player, initialSeason, toolbar, compact = false, headingId }: PlayerProfileViewProps) {
+export function PlayerProfileView({ player, initialSeason, toolbar, onSeasonChange, compact = false, headingId }: PlayerProfileViewProps) {
   const start = !initialSeason || initialSeason === ALL_SEASONS ? PLAYER_SEASONS[0] : initialSeason;
   const [season, setSeason] = useState(start);
   useEffect(() => setSeason(start), [player.name, start]);
@@ -210,7 +213,10 @@ export function PlayerProfileView({ player, initialSeason, toolbar, compact = fa
         <div className="min-w-0">{toolbar}</div>
         <label className="flex items-center gap-3">
           <span className="text-micro font-semibold uppercase text-fg-muted">Season</span>
-          <Select value={season} onChange={(e) => setSeason(e.target.value)} className="w-40">
+          <Select value={season} onChange={(e) => {
+              setSeason(e.target.value);
+              onSeasonChange?.(e.target.value);
+            }} className="w-40">
             {[...PLAYER_SEASONS, ALL_SEASONS].map((s) => (
               <option key={s} value={s}>
                 {s}
@@ -287,6 +293,11 @@ export function PlayerProfileView({ player, initialSeason, toolbar, compact = fa
             </div>
           )}
         </div>
+        {p && !empty && (
+          <div className="mt-4 flex justify-end">
+            <PlayerShare profile={p} photo={player.photo} />
+          </div>
+        )}
       </Card>
 
       {query.isError && !p && (

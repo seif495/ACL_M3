@@ -26,6 +26,9 @@ import {
 import { formatDateTime, signed } from '../explain/format';
 import { PITCH_LINES } from './pitchLines';
 import { usePlayerDialog } from '../../hooks/usePlayerDialog';
+import { ShareImageButton } from '../share/ShareImage';
+import { useExportPhoto } from '../share/exportPhoto';
+import { useExport } from '../share/exportContext';
 import { PointsChart } from './MlManagerChart';
 import { BenchCard, ChipsPanel, MovesCard } from './MlManagerPanels';
 import {
@@ -153,6 +156,9 @@ function StatusBanner({ gw, phase, nextDeadline }: { gw: MlManagerGameweek; phas
 
 function ManagerPitch({ gw, lineup, phase }: { gw: MlManagerGameweek; lineup: Lineup; phase: Phase }) {
   const dialog = usePlayerDialog();
+  // In the shared image: photos through the proxy, no click targets
+  const { exporting } = useExport();
+  const photoOf = useExportPhoto();
   const bought = new Set(gw.transfers.map((t) => t.in.element));
   const label =
     hasPoints(phase)
@@ -227,7 +233,7 @@ function ManagerPitch({ gw, lineup, phase }: { gw: MlManagerGameweek; lineup: Li
                   name={p.name}
                   displayName={p.web_name}
                   team={p.team}
-                  photo={p.photo}
+                  photo={photoOf(p.photo)}
                   opponents={opponentsOf(p)}
                   captain={p.captain}
                   viceCaptain={p.vice_captain}
@@ -235,7 +241,7 @@ function ManagerPitch({ gw, lineup, phase }: { gw: MlManagerGameweek; lineup: Li
                   value={value}
                   detail={detail}
                   onClick={
-                    dialog
+                    dialog && !exporting
                       ? () => dialog.openPlayer({ name: p.name, team: p.team, position: p.position, photo: p.photo })
                       : undefined
                   }
@@ -540,13 +546,35 @@ export function MlManager({ view, error, onRetry, updating = false }: MlManagerP
               <span className="sr-only">Formation </span>
               {formationOf(lineup.xi)}
             </span>
-            {gw.chip && (
-              <Chip tone="info" className="ml-auto">
-                <span className="sr-only">Chip: </span>
-                {CHIP_NAMES[gw.chip]}
-                {phase === 'planned' ? ' planned' : ' played'}
-              </Chip>
-            )}
+            <div className="ml-auto flex items-center gap-2">
+              {gw.chip && (
+                <Chip tone="info">
+                  <span className="sr-only">Chip: </span>
+                  {CHIP_NAMES[gw.chip]}
+                  {phase === 'planned' ? ' planned' : ' played'}
+                </Chip>
+              )}
+              <ShareImageButton
+                title={`ML manager, GW${gw.gameweek}`}
+                eyebrow="Team of the Week · ML manager"
+                subtitle={[
+                  formationOf(lineup.xi),
+                  shown.status === 'scored' && shown.result
+                    ? `${shown.result.points} points${phase === 'live' ? ' so far' : ''}`
+                    : shown.projected_points != null
+                      ? `${shown.projected_points.toFixed(1)} projected points`
+                      : null,
+                  gw.chip ? CHIP_NAMES[gw.chip] : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+                fileName={`pitch-me-ml-manager-gw${gw.gameweek}`}
+                shareText={`The team our points model runs in the FPL game, gameweek ${gw.gameweek}.`}
+                url="/team-of-the-week?mode=manager"
+              >
+                <ManagerPitch gw={shown} lineup={lineup} phase={phase} />
+              </ShareImageButton>
+            </div>
           </div>
           <ManagerPitch gw={shown} lineup={lineup} phase={phase} />
         </div>

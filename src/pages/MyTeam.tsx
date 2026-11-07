@@ -21,6 +21,7 @@ import { SquadTable } from '../components/myteam/SquadTable';
 import { TransferPlanner } from '../components/myteam/TransferPlanner';
 import { MyTeamChips } from '../components/myteam/MyTeamChips';
 import { SeasonSoFar } from '../components/myteam/SeasonSoFar';
+import { VsModel } from '../components/myteam/VsModel';
 import { TeamIdForm } from '../components/myteam/TeamIdForm';
 import { bigNumber, errorCopy, forgetTeamId, parseTeamId, readSavedTeamId, saveTeamId } from '../components/myteam/format';
 
@@ -172,7 +173,7 @@ export function MyTeam() {
             />
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
               <div className="min-w-0">
-                <MyTeamPitch squad={data.squad} lineup={data.lineup} />
+                <MyTeamPitch squad={data.squad} lineup={data.lineup} gameweek={data.gameweek} teamName={data.entry.name} />
               </div>
               <aside className="min-w-0 space-y-4">
                 <div className="grid grid-cols-2 gap-3">
@@ -226,6 +227,8 @@ export function MyTeam() {
           </section>
 
           <SeasonSoFar history={data.history} />
+
+          <VsModel history={data.history} />
         </div>
       )}
     </Container>

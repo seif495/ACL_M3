@@ -47,6 +47,7 @@ from graph.data_loader import FPLDataLoader
 from preprocessing.intent_classifier import IntentClassifier, Intent, is_team_squad_question
 from services import fixture_picks
 from services import player_outlook, transfer_advice
+from services import answer_sources, fixture_runs, my_team_assistant
 from preprocessing.entity_extractor import EntityExtractor
 # LAZY IMPORT: EmbeddingManager only when needed to avoid transformer/Keras dependency
 # from embeddings.embedding_manager import EmbeddingManager
@@ -57,13 +58,13 @@ except Exception:
 
 from services.player_index import PlayerIndex
 from services.avatars import AvatarService, ImageProxy, is_proxy_allowed, FPL_PHOTO_URL
-from services.predictions import get_predictions_df
+from services.predictions import get_predictions_df, predictions_path
 from services import season_service
 from services import model_review
 from services import answer_cards
 from services import analytics
 from services import explain
-from services.security import RateLimiter, limits_from_env, require_admin
+from services.security import RateLimiter, client_key, limits_from_env, require_admin
 from trivia.trivia_generator import TriviaGenerator, TriviaQuestion as GeneratedTriviaQuestion, TriviaCategory, Difficulty
 from llm.llm_manager import LLMManager, PromptBuilder
 from llm.prompts import PromptTemplates
@@ -506,7 +507,8 @@ def _filter_predictions(df, position: Optional[str], team: Optional[str], max_pr
 async def get_top_performers_csv(position: Optional[str] = None, limit: int = Query(10, ge=1, le=50),
                                  team: Optional[str] = Query(None, max_length=40),
                                  max_price: Optional[float] = Query(None, ge=3.0, le=20.0),
-                                 q: Optional[str] = Query(None, max_length=60)):
+                                 q: Optional[str] = Query(None, max_length=60),
+                                 horizon: int = Query(1, ge=1, le=4)):
     """
     Get top performers from precomputed predictions CSV.
     This endpoint provides faster responses by using pre-generated predictions.
@@ -521,8 +523,20 @@ async def get_top_performers_csv(position: Optional[str] = None, limit: int = Qu
     try:
         df = _filter_predictions(df, position, team, max_price, q)
 
-        # Sort by predicted points and get top N
-        df = df.nlargest(limit, 'predicted_points')
+        # Over several gameweeks: rank by the projections' total (projections.csv, the same run
+        # as the predictions; otherwise the next gameweek alone, and metadata.horizon says 1)
+        projected: Dict[int, List[Dict[str, Any]]] = {}
+        if horizon > 1 and 'element' in df.columns and len(df):
+            from services import my_team
+            projected = my_team.projected_by_element(my_team.load_projections(),
+                                                     int(df['gameweek'].iloc[0]), horizon)
+        if projected:
+            totals = df['element'].map(lambda e: sum(w['points'] for w in projected.get(int(e), []))
+                                       if pd.notna(e) else 0.0)
+            df = df.assign(_horizon_total=totals).nlargest(limit, '_horizon_total')
+        else:
+            df = df.nlargest(limit, 'predicted_points')
+        weeks = next(iter(projected.values()), [])
         
         # Format response
         predictions = []
@@ -536,7 +550,7 @@ async def get_top_performers_csv(position: Optional[str] = None, limit: int = Qu
                 "fixture_id": f"{row['team']}_vs_{row['opponent']}_GW{int(row['gameweek'])}"
             }
             
-            predictions.append({
+            item = {
                 "player_name": row['name'],
                 "web_name": _web_name(row['name']),
                 "predicted_points": round(float(row['predicted_points']), 2),
@@ -546,8 +560,14 @@ async def get_top_performers_csv(position: Optional[str] = None, limit: int = Qu
                 "model_version": row.get('prediction_method', 'xgboost_v3'),
                 "fixture_context": fixture_context,
                 **_availability_fields(row),
-            })
-        
+            }
+            if projected:
+                own = projected.get(int(row['element'])) if pd.notna(row.get('element')) else None
+                own = own or [{"gameweek": w["gameweek"], "points": 0.0} for w in weeks]
+                item["projected"] = own
+                item["projected_total"] = round(sum(w["points"] for w in own), 2)
+            predictions.append(item)
+
         return {
             "predictions": predictions,
             "model_version": str(df['prediction_method'].mode().iat[0]) if 'prediction_method' in df.columns and len(df) else 'xgboost_v3',
@@ -555,7 +575,9 @@ async def get_top_performers_csv(position: Optional[str] = None, limit: int = Qu
             "metadata": {
                 "position_filter": position,
                 "source": "precomputed_csv",
-                "gameweek": int(df.iloc[0]['gameweek']) if len(df) > 0 else None
+                "gameweek": int(df.iloc[0]['gameweek']) if len(df) > 0 else None,
+                "horizon": len(weeks) if projected else 1,
+                "horizon_gameweeks": [w["gameweek"] for w in weeks] if projected else None,
             }
         }
         
@@ -657,6 +679,8 @@ class QueryRequest(BaseModel):
     embedding_model: str = Field(default="minilm", max_length=32)  # "minilm" or "mpnet"
     is_first_message: bool = False  # only allows a greeting; the system prompt is always used
     chat_history: List[Dict[str, str]] = Field(default_factory=list)  # [{"role": "user"/"assistant", "content": ...}]
+    # The visitor's FPL team ID, saved by the My team page; "my team" questions use it
+    fpl_team_id: Optional[int] = Field(default=None, ge=1, le=99_999_999)
 
     @field_validator("chat_history")
     @classmethod
@@ -691,6 +715,9 @@ class QueryResponse(BaseModel):
     # fixtures, season) and suggested next questions; see services/answer_cards.py
     cards: List[Dict[str, Any]] = Field(default_factory=list)
     follow_ups: List[str] = Field(default_factory=list)
+    # What the answer is based on ("2026-27 season stats", "GW10 predictions (updated ...)");
+    # see services/answer_sources.py
+    sources: List[str] = Field(default_factory=list)
 
 
 class ImageSearchResponse(BaseModel):
@@ -795,6 +822,120 @@ def _transfer_context(conn, transfer: "transfer_advice.TransferQuestion") -> str
     """The Transfer Analysis for a transfer question (services/transfer_advice.py). Blocking."""
     outlooks = player_outlook.load_outlooks(conn, transfer.players, get_predictions_df())
     return transfer_advice.context(transfer, outlooks)
+
+
+def _predictions_gameweek(df) -> Optional[int]:
+    try:
+        return int(df["gameweek"].iloc[0]) if df is not None and len(df) and "gameweek" in df.columns else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _my_team_context(team_id: int, kind: str) -> Dict[str, Any]:
+    """The visitor's team for a "my team" question (services/my_team_assistant.py): the squad
+    context, plus the planner's moves for transfer and chip questions. Errors become a short
+    note for the LLM instead of failing the answer. Blocking (FPL, and a plan takes ~5 s)."""
+    from services import my_team, team_optimizer
+    out: Dict[str, Any] = {"team": None, "plan": None, "error": None, "context": ""}
+    try:
+        team = my_team.get_team(team_id)
+    except my_team.TeamNotFound:
+        out["error"] = "not_found"
+    except my_team.TeamNotReady:
+        out["error"] = "not_ready"
+    except my_team.FplUnavailable as exc:
+        logger.warning("Assistant: my team %s: %s", team_id, exc)
+        out["error"] = "fpl_down"
+    except Exception:
+        logger.exception("Assistant: my team %s failed", team_id)
+        out["error"] = "fpl_down"
+    if out["error"]:
+        out["context"] = my_team_assistant.error_note(out["error"], team_id)
+        return out
+    out["team"] = team
+    parts = [my_team_assistant.team_context(team)]
+    if kind in ("transfers", "chips"):
+        try:
+            plan = my_team.plan_team(team_id, max_hits=0, chips=kind == "chips")
+            out["plan"] = plan
+            parts.append(my_team_assistant.plan_context(plan, (team.get("lineup") or {}).get("projected_points")))
+        except (my_team.PlanUnavailable, my_team.PlanBusy, my_team.TeamNotReady) as exc:
+            parts.append(my_team_assistant.plan_missing_note(str(exc)))
+        except (team_optimizer.InfeasibleError, ValueError) as exc:
+            logger.warning("Assistant: no plan for team %s: %s", team_id, exc)
+            parts.append(my_team_assistant.plan_missing_note("the planner found no valid plan for this squad"))
+        except Exception:
+            logger.exception("Assistant: plan for team %s failed", team_id)
+            parts.append(my_team_assistant.plan_missing_note("the planner failed"))
+    out["context"] = "\n\n".join(parts)
+    return out
+
+
+def _projection_weeks(horizon: int) -> Tuple[Dict[int, List[Dict[str, Any]]], Any, List[int]]:
+    """({element: [{gameweek, points}]}, projections frame, gameweeks) for the next `horizon`
+    gameweeks, from the projections of the same run as the predictions (else empty)."""
+    from services import my_team
+    proj = my_team.load_projections()
+    by_el = my_team.projected_by_element(proj, _predictions_gameweek(get_predictions_df()), horizon)
+    weeks = [w["gameweek"] for w in next(iter(by_el.values()), [])]
+    return by_el, proj, weeks
+
+
+def _fixture_run_context(conn, kind: str, question: str, teams: List[str], position: Optional[str]) -> Dict[str, Any]:
+    """Clubs' coming fixtures (the ticker) or players' projected points over the next gameweeks
+    (services/fixture_runs.py). Blocking."""
+    asked = fixture_runs.requested_weeks(question)
+    out: Dict[str, Any] = {"context": "", "rows": [], "weeks": [], "used": {}}
+    if kind == "clubs":
+        weeks = min(asked or fixture_runs.DEFAULT_CLUB_WEEKS, fixture_runs.MAX_CLUB_WEEKS)
+        try:
+            ticker = season_service.get_fixture_ticker(conn, weeks)
+        except season_service.NotFoundError as exc:
+            out["context"] = f"No coming fixtures are available ({exc})."
+            return out
+        out["context"] = fixture_runs.clubs_context(ticker, teams, fixture_runs.wants_hardest(question), asked)
+        out["used"] = {"fixtures": True}
+        return out
+    horizon = min(asked or fixture_runs.PROJECTION_WEEKS, fixture_runs.PROJECTION_WEEKS)
+    by_el, proj, weeks = _projection_weeks(horizon)
+    plural = answer_cards.POSITION_WORDS.get(position, (None, None))[1] if position else None
+    if by_el:
+        rows = fixture_runs.player_run_rows(proj, by_el, position)
+        out.update(rows=rows, weeks=weeks, context=fixture_runs.players_context(rows, plural, asked, weeks),
+                   used={"projections": True, "predictions": True})
+        return out
+    df = get_predictions_df()
+    if df is not None and len(df):
+        out["context"] = fixture_runs.next_gameweek_fallback(df, position, asked)
+        out["used"] = {"predictions": True}
+    else:
+        out["context"] = "No predictions or projections are available yet; say so."
+    return out
+
+
+def _chip_guidance_context(conn) -> Tuple[str, Dict[str, Any], List[int]]:
+    """Chip guidance without a team: triple-captain candidates, the best projected player per
+    coming gameweek, and double/blank gameweeks from the fixture ticker. Blocking."""
+    df = get_predictions_df()
+    by_el, proj, weeks = _projection_weeks(fixture_runs.PROJECTION_WEEKS)
+    per_gw: Dict[int, List[Dict[str, Any]]] = {}
+    if by_el and proj is not None:
+        names = {int(r["element"]): str(r.get("web_name") or r.get("name"))
+                 for r in proj[["element", "name", "web_name"]].drop_duplicates("element").to_dict("records")}
+        for el, rows in by_el.items():
+            for w in rows:
+                per_gw.setdefault(w["gameweek"], []).append({"name": names.get(el, str(el)), "points": w["points"]})
+        for rows in per_gw.values():
+            rows.sort(key=lambda r: -r["points"])
+    used: Dict[str, Any] = {"predictions": df is not None, "projections": bool(per_gw)}
+    try:
+        ticker = season_service.get_fixture_ticker(conn, 8)
+        specials = my_team_assistant.doubles_and_blanks(ticker)
+        used["fixtures"] = True
+    except Exception as exc:  # no fixtures yet, or Neo4j down: the rest still answers
+        logger.warning("Chip guidance without fixtures: %s", exc)
+        specials = {}
+    return my_team_assistant.chip_guidance_context(df, per_gw, specials), used, weeks
 
 
 def get_player_index(conn=None) -> PlayerIndex:
@@ -1234,6 +1375,30 @@ def get_neo4j_conn():
 from services import seo  # noqa: E402
 seo.register(app, get_neo4j_conn)
 
+# Player pages by URL slug (/players/<slug>): slug -> graph name
+from services import player_pages  # noqa: E402
+player_pages.register(app, get_neo4j_conn, get_player_index)
+
+# The model's track record: each finished gameweek's pre-deadline predictions against the results
+from services import track_record  # noqa: E402
+track_record.register(app)
+
+# Gameweek deadlines as a calendar feed (/api/calendar/deadlines.ics) with reminders
+from services import calendar_feed  # noqa: E402
+calendar_feed.register(app)
+
+# Daily trivia challenge: the same 5 questions for everyone each UTC day (services/daily_trivia.py)
+from services import daily_trivia  # noqa: E402
+daily_trivia.register(app, get_neo4j_conn)
+
+# Scorers under each finished result on the Fixtures page (services/gameweek_scorers.py)
+from services import gameweek_scorers  # noqa: E402
+gameweek_scorers.register(app, get_neo4j_conn)
+
+# Predicted final table and match forecasts (services/forecasts.py, services/team_strength.py)
+from services import forecasts  # noqa: E402
+forecasts.register(app, get_neo4j_conn)
+
 
 def run_embedding_build(model_key: str, conn: Neo4jConnection) -> None:
     """Build embeddings asynchronously or load prebuilt ones."""
@@ -1589,6 +1754,23 @@ async def disconnect_neo4j():
 query_limiter = RateLimiter(limits_from_env("QUERY_RATE_LIMITS", "10/60,120/3600"))
 
 
+def _rate_limit_headers(left: Optional[Tuple[int, float]]) -> Dict[str, str]:
+    """X-RateLimit-Remaining (questions left in the tightest window) and X-RateLimit-Window
+    (that window in seconds), so the assistant can say "3 questions left this hour"."""
+    if not left:
+        return {}
+    return {"X-RateLimit-Remaining": str(int(left[0])), "X-RateLimit-Window": str(int(left[1]))}
+
+
+def query_rate_limit(request: Request, response: Response) -> Dict[str, str]:
+    """The question rate limit (429 with Retry-After when over it), then the count left as
+    headers: set on the JSON response here, returned for the stream to add itself."""
+    query_limiter.dependency(request)
+    headers = _rate_limit_headers(query_limiter.remaining(client_key(request)))
+    response.headers.update(headers)
+    return headers
+
+
 def greeting_response() -> QueryResponse:
     """The reply to a first message that is only small talk ("hi", "thanks")."""
     return QueryResponse(
@@ -1620,15 +1802,21 @@ class PreparedAnswer:
     embedding_used: bool
     prompt: Optional[str]          # None when no LLM is configured
     cards_task: asyncio.Task
+    sources: Optional[List[str]] = None   # "Based on: ..." (services/answer_sources.py)
+    note: Optional[str] = None     # appended to the answer (e.g. the My team page hint)
 
     def finish(self, text: str) -> str:
         """The final answer from the LLM's text (tied top scorers enforced), or the raw graph
         data when there is no LLM."""
         if self.prompt is None:
-            return f"**Knowledge Graph data:**\n\n{self.cypher_context}"
-        return enforce_tied_top_scorers_in_answer(
-            answer=text, intent=self.intent, query_method=self.query_method, params=self.params, results=self.results,
-        )
+            answer = f"**Knowledge Graph data:**\n\n{self.cypher_context or self.ml_context or ''}"
+        else:
+            answer = enforce_tied_top_scorers_in_answer(
+                answer=text, intent=self.intent, query_method=self.query_method, params=self.params, results=self.results,
+            )
+        if self.note and answer and not answer.startswith("Error"):
+            answer = f"{answer.rstrip()}\n\n{self.note}"
+        return answer
 
     async def response(self, answer: str) -> QueryResponse:
         cards, follow_ups = await self.cards_task
@@ -1646,6 +1834,7 @@ class PreparedAnswer:
             model_type=_ml_model_label(),
             cards=cards,
             follow_ups=follow_ups,
+            sources=list(self.sources or []),
         )
 
 
@@ -1705,10 +1894,79 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
             entities.players = transfer.players
             params.update(season=CURRENT_SEASON, transfer_moves=[[m.sell, m.buy] for m in transfer.moves])
 
+        # "Who should I captain?", "What transfers should I make?", "When should I use my bench
+        # boost?": the visitor's own team when the My team page saved its ID (fpl_team_id), else
+        # generic guidance plus a pointer to that page (services/my_team_assistant.py). "Best
+        # defenders for the next 5 gameweeks", "Which teams have the easiest fixtures?": the
+        # fixture ticker or the projections (services/fixture_runs.py). None of them runs Cypher.
+        team_ctx: Optional[str] = None
+        fixture_ctx: Optional[str] = None
+        note: Optional[str] = None
+        used: Dict[str, Any] = {}
+        projection_weeks: List[int] = []
+        team_payload: Optional[Dict[str, Any]] = None
+        special = False
+        if transfer is None and not (squad or per_fixture) and intent_result.intent != Intent.TEAM_OF_THE_WEEK:
+            my_kind = my_team_assistant.question_kind(request.question)
+            run_kind = None
+            if my_kind is not None and request.fpl_team_id:
+                special = True
+                intent_result.intent = Intent.CHIP_ADVICE if my_kind == "chips" else Intent.MY_TEAM
+                mine = await asyncio.to_thread(_my_team_context, request.fpl_team_id, my_kind)
+                team_ctx = mine["context"]
+                used.update(team=True, team_error=bool(mine["error"]))
+                team_payload = mine["team"]
+                if team_payload is not None:
+                    params["my_team"] = team_payload
+                    used["predictions"] = True
+                    weeks = next((r["projected"] for r in team_payload.get("squad") or [] if r.get("projected")), [])
+                    projection_weeks = [w["gameweek"] for w in weeks]
+                    used["projections"] = bool(projection_weeks)
+                else:
+                    # The team couldn't be loaded: the answer still has the top predictions
+                    df_now = get_predictions_df()
+                    if df_now is not None and len(df_now):
+                        fixture_ctx = _top_predictions_context(df_now, 5)
+                        used["predictions"] = True
+                if mine["plan"] is not None:
+                    used["plan"] = True
+                    params["transfer_moves"] = my_team_assistant.plan_moves(mine["plan"])
+                params["season"] = CURRENT_SEASON
+            elif my_kind is not None:
+                note = my_team_assistant.MY_TEAM_HINT
+                if my_kind == "chips":
+                    special = True
+                    intent_result.intent = Intent.CHIP_ADVICE
+                    fixture_ctx, chip_used, projection_weeks = await asyncio.to_thread(_chip_guidance_context, conn)
+                    used.update(chip_used)
+                    params["season"] = CURRENT_SEASON
+                elif my_kind == "transfers" and not entities.players:
+                    run_kind = "players"   # generic targets: the best players over the next weeks
+            if not special and run_kind is None and my_kind is None:
+                run_kind = fixture_runs.classify(request.question, entities.players, entities.teams, entities.positions)
+            if run_kind is not None:
+                special = True
+                intent_result.intent = Intent.FIXTURE_RUN
+                position = season_service.normalize_position(entities.positions[0]) if entities.positions else None
+                position = position if position in answer_cards.POSITION_WORDS else None
+                teams = list(entities.teams) if run_kind == "clubs" else []
+                run = await asyncio.to_thread(_fixture_run_context, conn, run_kind, request.question, teams, position)
+                fixture_ctx = run["context"]
+                used.update(run["used"])
+                projection_weeks = run["weeks"]
+                params.update(season=CURRENT_SEASON, run_kind=run_kind, projection_rows=run["rows"],
+                              projection_weeks=run["weeks"])
+                params.pop("position", None)
+                if position:
+                    params["position"] = position
+                params.pop("team_name", None)
+                if len(teams) == 1:
+                    params["team_name"] = teams[0]
+
         # Several players weighed over the coming gameweek ("Is he a better captain than
         # Haaland this week?"): every one's forecast goes to the LLM, and they're compared on
         # this season (a comparison card with the predictions first)
-        forecast = (transfer is None and not per_fixture and len(entities.players) >= 2
+        forecast = (transfer is None and not per_fixture and not special and len(entities.players) >= 2
                     and intent_result.intent != Intent.TEAM_OF_THE_WEEK
                     and (intent_result.intent == Intent.PREDICTION
                          or player_outlook.is_next_gameweek_question(request.question)))
@@ -1891,7 +2149,7 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
         
         # A transfer answer rests on this season and the forecasts; similar players (often from
         # earlier seasons) only invited career numbers into it
-        if request.retrieval_method in ["Embeddings", "Hybrid"] and transfer is None:
+        if request.retrieval_method in ["Embeddings", "Hybrid"] and transfer is None and not special:
             current_manager = app_state["embedding_manager"]
             if not current_manager:
                 # No manager yet — create a lazy one with prebuilt
@@ -1947,6 +2205,9 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
                 except Exception as e:
                     print(f"Embedding search failed: {e}")
 
+        if special and not executed_query:
+            cypher_context = "Not used for this question: the sections below have the current season's data."
+
         prompt = None
         if app_state["llm_manager"] and app_state["llm_manager"].available:
             data_scope = f"the {params['season']} season" if "season" in params else f"all seasons ({', '.join(SEASONS)})"
@@ -1961,13 +2222,33 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
                 chat_history=request.chat_history,
                 model_key=request.model,  # Pass model key for model-specific prompting
                 transfer_context=ml_context if transfer is not None else None,
+                team_context=team_ctx,
+                fixture_context=fixture_ctx,
             )
+
+        # "Based on: ..." from what this answer actually used
+        if executed_query:
+            used["season"] = params.get("season") or "all"
+        if intent_result.intent == Intent.TEAM_OF_THE_WEEK and params.get("team_mode") == "predicted":
+            used["predictions"] = True
+        elif intent_result.intent == Intent.TEAM_OF_THE_WEEK and params.get("team_mode"):
+            used["season"] = CURRENT_SEASON
+        elif ml_context and (intent_result.intent == Intent.PREDICTION or forecast or per_fixture or transfer is not None):
+            used["predictions"] = True
+        used["embeddings"] = embedding_used
+        predictions_now = get_predictions_df() if used.get("predictions") else None
+        sources = answer_sources.build_sources(
+            used, current_season=CURRENT_SEASON, predictions_gameweek=_predictions_gameweek(predictions_now),
+            predictions_mtime=answer_sources.file_mtime(predictions_path()) if used.get("predictions") else None,
+            projection_weeks=projection_weeks,
+            team_gameweek=(team_payload or {}).get("based_on_gameweek"))
 
         return PreparedAnswer(
             intent=intent_result.intent, query_method=query_method, params=params, entities=entities,
             results=results, executed_query=executed_query, cypher_context=cypher_context,
-            ml_context=ml_context, embedding_context=embedding_context, embedding_used=embedding_used,
-            prompt=prompt, cards_task=cards_task,
+            ml_context="\n\n".join(c for c in (ml_context, team_ctx, fixture_ctx) if c) or None,
+            embedding_context=embedding_context, embedding_used=embedding_used,
+            prompt=prompt, cards_task=cards_task, sources=sources, note=note,
         )
     except BaseException:
         if cards_task is not None:
@@ -1975,7 +2256,7 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
         raise
 
 
-@app.post("/api/query", response_model=QueryResponse, dependencies=[Depends(query_limiter.dependency)])
+@app.post("/api/query", response_model=QueryResponse, dependencies=[Depends(query_rate_limit)])
 async def query_fpl(request: QueryRequest, conn=Depends(get_neo4j_conn)):
     """Process FPL query and return answer."""
     # Only return the initial greeting when this is the user's first message in the session
@@ -2072,7 +2353,7 @@ async def _answer_events(request: QueryRequest, conn) -> AsyncIterator[str]:
             if kind == "cards" and not cards_sent:
                 cards_sent = True
                 cards, follow_ups = prepared.cards_task.result()  # build_answer_cards never raises
-                yield _sse("cards", {"cards": cards, "follow_ups": follow_ups})
+                yield _sse("cards", {"cards": cards, "follow_ups": follow_ups, "sources": list(prepared.sources or [])})
             elif kind == "delta":
                 pieces.append(value)
                 yield _sse("delta", {"text": value})
@@ -2099,11 +2380,13 @@ async def _answer_events(request: QueryRequest, conn) -> AsyncIterator[str]:
             prepared.cards_task.cancel()
 
 
-@app.post("/api/query/stream", dependencies=[Depends(query_limiter.dependency)])
-async def query_fpl_stream(request: QueryRequest, conn=Depends(get_neo4j_conn)):
+@app.post("/api/query/stream")
+async def query_fpl_stream(request: QueryRequest, conn=Depends(get_neo4j_conn),
+                           rate_headers: Dict[str, str] = Depends(query_rate_limit)):
     """POST /api/query as server-sent events (see _answer_events). Same request body and rate
     limit; a failure after the stream has started arrives as an `error` event."""
-    return StreamingResponse(_answer_events(request, conn), media_type="text/event-stream", headers=SSE_HEADERS)
+    headers = {**SSE_HEADERS, **(rate_headers if isinstance(rate_headers, dict) else {})}
+    return StreamingResponse(_answer_events(request, conn), media_type="text/event-stream", headers=headers)
 
 
 @app.post("/api/embeddings/build", response_model=EmbeddingBuildResponse, dependencies=[Depends(require_admin)])
@@ -2643,6 +2926,14 @@ def season_fixtures(gameweek: Optional[int] = None, conn=Depends(get_neo4j_conn)
     return _season_call(season_service.get_fixtures, conn, gameweek)
 
 
+@app.get("/api/fixtures/ticker")
+def fixture_ticker(gameweeks: int = Query(6, ge=1, le=10), start: Optional[int] = Query(None, ge=1, le=38),
+                   conn=Depends(get_neo4j_conn)):
+    """Fixture difficulty ticker: every club's next `gameweeks` gameweeks (from the next one, or
+    `start`) with FPL's difficulty from its side, easiest run first (season_service.fixture_ticker)."""
+    return _season_call(season_service.get_fixture_ticker, conn, gameweeks, start)
+
+
 @app.get("/api/table", response_model=TableResponse)
 def season_table(conn=Depends(get_neo4j_conn)):
     """League table computed from the season's finished fixtures."""
@@ -2931,6 +3222,19 @@ class AnalyticsSummaryResponse(BaseModel):
     top_referrers: List[AnalyticsReferrer]
     top_countries: List[AnalyticsCountry]
     top_zones: List[AnalyticsZone]
+
+
+# Insights page: captain options, differentials and value, transfers and prices, set-piece takers
+from services import insights  # noqa: E402
+insights.register(app, _photo_for)
+
+# Gameweek page: live points and bonus, or the recap (services/gameweek_page.py)
+from services import gameweek_page  # noqa: E402
+gameweek_page.register(app, get_neo4j_conn, _photo_for)
+
+# Team of the Week builder: re-run the optimizer with the user's constraints (services/team_builder.py)
+from services import team_builder  # noqa: E402
+team_builder.register(app, get_neo4j_conn, _photo_for)
 
 
 # ------------------------------------------------------------------------- My team

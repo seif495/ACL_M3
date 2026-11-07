@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { cn } from '../../utils/cn';
 import { ClubCrest } from './Identity';
 import { getClubAbbreviation } from '../../utils/clubLogos';
+import { shortName } from '../../utils/playerNames';
 
 /** Full club name from sm up; the three-letter code on phones, where names used to truncate. */
 function TeamName({ team }: { team: string }) {
@@ -21,6 +22,32 @@ function TeamName({ team }: { team: string }) {
 
 export type FixtureStatus = 'scheduled' | 'live' | 'finished' | 'postponed';
 
+/** One goal under a result: minute only when known; `own_goal` is marked "(og)". */
+export interface RowScorer {
+  name: string;
+  webName?: string | null;
+  kind?: 'goal' | 'penalty' | 'own_goal';
+  minute?: number | null;
+  extra?: number | null;
+  count?: number;
+}
+
+function scorerText(s: RowScorer): string {
+  const name = shortName(s.name, s.webName);
+  const minute = s.minute != null ? ` ${s.minute}${s.extra ? `+${s.extra}` : ''}'` : '';
+  const tags = `${s.kind === 'penalty' ? ' (pen)' : ''}${s.kind === 'own_goal' ? ' (og)' : ''}`;
+  return `${name}${s.count && s.count > 1 ? ` ×${s.count}` : ''}${minute}${tags}`;
+}
+
+function ScorerList({ scorers, align }: { scorers: RowScorer[]; align: 'left' | 'right' }) {
+  if (!scorers.length) return <div />;
+  return (
+    <p className={cn('min-w-0 text-micro leading-snug text-fg-subtle', align === 'right' ? 'text-right' : 'text-left')}>
+      {scorers.map(scorerText).join(', ')}
+    </p>
+  );
+}
+
 interface FixtureRowProps {
   home: string;
   away: string;
@@ -32,6 +59,8 @@ interface FixtureRowProps {
   showDay?: boolean;
   /** Makes the row a link, e.g. to the match page. */
   to?: string;
+  /** Goal scorers of a finished match, shown under the score. */
+  scorers?: { home: RowScorer[]; away: RowScorer[] } | null;
   className?: string;
 }
 
@@ -44,12 +73,14 @@ function formatKickoff(kickoff: string | Date | null | undefined, showDay: boole
 }
 
 /** Home crest/name · score or kickoff · away crest/name, centred on the score like FPL's fixtures list. */
-export function FixtureRow({ home, away, homeScore, awayScore, kickoff, status = 'scheduled', showDay = false, to, className }: FixtureRowProps) {
+export function FixtureRow({ home, away, homeScore, awayScore, kickoff, status = 'scheduled', showDay = false, to, scorers, className }: FixtureRowProps) {
   const hasScore = homeScore != null && awayScore != null && (status === 'finished' || status === 'live');
   const statusLabel = status === 'finished' ? 'FT' : status === 'live' ? 'Live' : status === 'postponed' ? 'Postponed' : null;
 
+  const hasScorers = status === 'finished' && !!scorers && (scorers.home.length > 0 || scorers.away.length > 0);
+
   const rowClass = cn(
-    'grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-line px-2 py-3 last:border-0 sm:gap-4 sm:px-4',
+    'grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 border-b border-line px-2 py-3 last:border-0 sm:gap-x-4 sm:px-4',
     to && 'transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
     className,
   );
@@ -94,6 +125,14 @@ export function FixtureRow({ home, away, homeScore, awayScore, kickoff, status =
         <ClubCrest team={away} size={24} />
         <TeamName team={away} />
       </div>
+
+      {hasScorers && scorers && (
+        <>
+          <ScorerList scorers={scorers.home} align="right" />
+          <span aria-hidden="true" />
+          <ScorerList scorers={scorers.away} align="left" />
+        </>
+      )}
     </>
   );
   return to ? (

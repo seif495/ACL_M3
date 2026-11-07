@@ -7,6 +7,7 @@ import { useHealthSync } from '../../hooks/useHealthSync';
 import { cn } from '../../utils/cn';
 import { SiteHeader } from './SiteHeader';
 import { DeadlineBar } from './DeadlineBar';
+import { OfflineNotice } from './OfflineNotice';
 import { SiteFooter } from './SiteFooter';
 import { PlayerSearchDialog } from './PlayerSearchDialog';
 import { PlayerDialogProvider } from '../players/PlayerDialog';
@@ -106,6 +107,7 @@ export function AppShell() {
         Skip to content
       </a>
       <SiteHeader onOpenSearch={openSearch} />
+      <OfflineNotice />
       {season?.next_gameweek && season.next_deadline && (
         <DeadlineBar gameweek={season.next_gameweek} deadline={season.next_deadline} />
       )}

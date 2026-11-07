@@ -1636,6 +1636,42 @@ async def build_pitch_card(ctx: CardContext) -> Optional[Dict[str, Any]]:
     return pitch_card(team, finished, ctx.short)
 
 
+async def build_my_team_card(ctx: CardContext) -> Optional[Dict[str, Any]]:
+    """The visitor's suggested XI (services/my_team.get_team, in params["my_team"]) on the pitch."""
+    from services import my_team_assistant as mta
+    team = ctx.params.get("my_team")
+    if not team:
+        return None
+    payload = mta.pitch_team(team, ctx.photo)
+    if payload is None:
+        return None
+    card = pitch_card(payload, (), ctx.short)
+    if card is None:
+        return None
+    entry = team.get("entry") or {}
+    card["id"] = f"pitch:my_team:{entry.get('id')}:{payload['gameweek']}"
+    card["variant"] = "my_team"
+    card["team_name"] = entry.get("name") or None
+    card["_follow_ups"] = [
+        _follow("What transfers should I make?", "my_team"),
+        _follow("Who should I captain from my team?", "my_team"),
+        _follow("When should I use my bench boost?", "chip_advice"),
+    ]
+    return card
+
+
+async def build_projection_card(ctx: CardContext) -> Optional[Dict[str, Any]]:
+    """The best players by projected points over the next gameweeks (services/fixture_runs.py)."""
+    from services import fixture_runs as fr
+    rows, weeks = ctx.params.get("projection_rows") or [], ctx.params.get("projection_weeks") or []
+    card = fr.projection_card(rows, weeks, ctx.params.get("position"), player_ref, ctx.photo, ctx.photo_codes,
+                              ctx.current_season, POSITION_WORDS)
+    if card and rows:
+        card["_follow_ups"] = [_follow(f"{rows[0]['name']} stats this season", "player_stats"),
+                               _follow("Which teams have the easiest fixtures?", "fixture_run")]
+    return card
+
+
 # ------------------------------------------------------------------ follow-up questions
 
 _classifier = None
@@ -1651,6 +1687,19 @@ def _intent_of(question: str) -> Optional[str]:
         return _classifier.classify(question).intent.value
     except Exception:
         return None
+
+
+def _routes_to(question: str, intent: str) -> bool:
+    """Whether the assistant would answer `question` with `intent`. My-team, chip and fixture-run
+    questions are routed by the API's detectors (not the classifier), so those are checked there."""
+    if intent in ("my_team", "chip_advice"):
+        from services import my_team_assistant as mta
+        kind = mta.question_kind(question)
+        return kind is not None and (kind == "chips") == (intent == "chip_advice")
+    if intent == "fixture_run":
+        from services import fixture_runs as fr
+        return fr.classify(question) is not None
+    return _intent_of(question) == intent
 
 
 def askable_team(team: str) -> bool:
@@ -1680,7 +1729,7 @@ def follow_up_questions(question: str, candidates: Iterable[Tuple[str, str]], li
     seen = {asked}
     for text, intent in candidates:
         key = normalize_name(text)
-        if key in seen or _intent_of(text) != intent:
+        if key in seen or not _routes_to(text, intent):
             continue
         seen.add(key)
         out.append(text)
@@ -1709,6 +1758,20 @@ def plan(ctx: CardContext) -> List[Awaitable[Any]]:
 
     if intent == "team_of_the_week":
         return [build_pitch_card(ctx)]
+    if intent in ("my_team", "chip_advice") and params.get("my_team"):
+        # The visitor's own squad; a transfer plan adds one comparison per planned move
+        moves = [m for m in (params.get("transfer_moves") or []) if len(m) == 2 and all(m)]
+        return [build_my_team_card(ctx)] + [
+            build_comparison_card(ctx, list(m), ctx.current_season, emphasis="prediction")
+            for m in moves[:MAX_CARDS - 1]]
+    if intent == "chip_advice":
+        return [build_prediction_card(ctx)]
+    if intent == "fixture_run":
+        if params.get("run_kind") == "players":
+            return [build_projection_card(ctx)]
+        if params.get("team_name"):
+            return [build_team_card(ctx, params["team_name"])]
+        return []
     if intent == "transfer_advice":
         # One comparison per move, sold player first, this season with the predictions on top
         moves = [m for m in (params.get("transfer_moves") or []) if len(m) == 2 and all(m)]

@@ -152,6 +152,12 @@ Results, including misses (which expire), persist to `.cache/avatars.json`. When
     - otherwise `ml.snapshots.HORIZON_POINTS`, fitted on players who were playing when flagged against unflagged players of the same position and recent minutes (`python -m scripts.analysis.horizon_availability`, 2020-21..2025-26): injured 0.25/0.35/0.65, suspended 0.85/1/1, 25% doubt 0.5/0.55/0.7, 50% 0.7/0.75/1, 75% 0.9/0.9/0.95 one to three gameweeks on.
 
     Before 2026-11-15 the flagged inputs were kept for every projected gameweek, so a one-match ban cost a player about 85% of all four (the manager sold suspended players). The replay's snapshots have no news, so it exercises the fitted factors only.
+
+    Checked on 2026-11-15 by replaying 2022-23..2024-25 from GW1, 5, 9 and 13 on this change (run 43736266241) and on `main` (run 43736270401), the same model and 12 paths:
+    - **Suspended:** projections 2-4 gameweeks ahead were 1.1-1.3 points under what the players scored (1.4-1.9 for those who had played 60+ minutes the gameweek before); now 0.1-0.3 under. RMSE fell from 2.90/2.97/3.23 to 2.52/2.67/2.89.
+    - **Injured:** RMSE 0.990/1.303/1.509 to 0.985/1.292/1.467 and less bias over all of them. The 56-61 who had played 60+ minutes the gameweek before are over-projected three gameweeks on (+0.72, from +0.32): for a player injured in his last match, 0.65 is high (the calibration's own "regulars" split says 0.36), but the sample is too small to refit on.
+    - **Doubts:** RMSE unchanged (2.165/2.329/2.417 to 2.168/2.324/2.386), less under-projection overall; the 360 regulars among them moved from level to +0.1-0.4 over, within their noise.
+    - **Planner:** `default` 24825 against 24608 points, +0.57 a gameweek [-0.17, +1.35], ahead on 8 of 12 paths; `nochips` +0.50 [-0.23, +1.28], 5 of 12; `hold` identical (the next gameweek's predictions don't change). No failed plan and no solve at its time limit. Positive but inside what the replay can't resolve.
   - **Solve:** a multi-period MILP (scipy `milp`) over that horizon, with selling prices, the bank, banked free transfers, at most 2 hits a gameweek, and a 0.9 decay per gameweek ahead. Only this gameweek's moves are kept, and it replans every run until the deadline.
   - **Chips:** a chip is played only when its solve beats the plan without it, by the module's thresholds (`TRIPLE_CAPTAIN_MIN_POINTS` and the rest), or late in its window if it still helps.
   - **Armband:** captain and vice come from `pick_captains`.

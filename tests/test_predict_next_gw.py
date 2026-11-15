@@ -1,7 +1,7 @@
 """Tests for pipeline/predict_next_gw.py and the live-file selection in services/predictions.py."""
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -472,11 +472,15 @@ def test_failing_shadow_never_touches_the_live_predictions(live_dir):
 
 @pytest.mark.parametrize("status, chance, expected", [
     ("a", np.nan, [1.0, 1.0, 1.0, 1.0]),
-    ("d", 50.0, [0.77, 1.0, 1.0, 1.0]),     # a doubt counts for the next gameweek only
-    ("d", 25.0, [0.61, 1.0, 1.0, 1.0]),
-    ("i", 0.0, [0.0, 0.5, 1.0, 1.0]),       # ruled out: half the gameweek after, then full
-    ("i", np.nan, [0.0, 0.5, 1.0, 1.0]),
-    ("s", 0.0, [0.0, 0.5, 1.0, 1.0]),
+    # Fitted on flagged players' next gameweeks (ml.snapshots.HORIZON_POINTS): a doubt lingers,
+    ("d", 50.0, [0.77, 0.7, 0.75, 1.0]),
+    ("d", 25.0, [0.61, 0.5, 0.55, 0.7]),
+    ("d", 75.0, [0.91, 0.9, 0.9, 0.95]),
+    # an injury with no return date keeps most of its cost,
+    ("i", 0.0, [0.0, 0.25, 0.35, 0.65]),
+    ("i", np.nan, [0.0, 0.25, 0.35, 0.65]),
+    # and a ban is usually one match
+    ("s", 0.0, [0.0, 0.85, 1.0, 1.0]),
     ("u", np.nan, [0.0, 0.0, 0.0, 0.0]),    # left the club: never
     ("u", 100.0, [0.0, 0.0, 0.0, 0.0]),
     ("n", np.nan, [0.0, 0.0, 0.0, 0.0]),
@@ -484,13 +488,81 @@ def test_failing_shadow_never_touches_the_live_predictions(live_dir):
 def test_horizon_availability(status, chance, expected):
     assert [png.horizon_availability(status, chance, step) for step in (1, 2, 3, 4)] == pytest.approx(expected)
     assert png.horizon_availability(status, chance, 1) == png.availability_factor(status, chance)
+    assert png.horizon_availability(status, chance, 7) == pytest.approx(expected[-1])   # past the table: its last value
 
 
 def test_horizon_chance_of_playing_is_fpls():
+    """The armband's chance is FPL's own for the next gameweek; later gameweeks share the fitted factor."""
     from services.season_service import chance_of_playing
     chances = [png.horizon_availability("d", 50.0, step, factor=chance_of_playing) for step in (1, 2, 3)]
-    assert chances == [0.5, 1.0, 1.0]
-    assert [png.horizon_availability("i", 0.0, step, factor=chance_of_playing) for step in (1, 2, 3)] == [0.0, 0.5, 1.0]
+    assert chances == [0.5, 0.7, 0.75]
+    assert [png.horizon_availability("i", 0.0, step, factor=chance_of_playing) for step in (1, 2, 3)] == [0.0, 0.25, 0.35]
+
+
+@pytest.mark.parametrize("news, expected", [
+    ("Hamstring injury - Expected back 6 Dec", date(2026, 12, 6)),
+    ("Suspended until 22 Nov", date(2026, 11, 22)),
+    ("Knee injury - Expected back 03 January", date(2027, 1, 3)),     # the year nearest to today
+    ("Unspecified injury - Expected back 31 Oct", date(2026, 10, 31)),  # already past: still this year
+    ("Knee injury - Unknown return date", None),
+    ("Has joined Oxford United on loan until January", None),         # no day
+    ("Knock - 75% chance of playing", None),
+    ("Expected back 31 Feb", None),                                   # not a date
+    ("", None), (None, None), (float("nan"), None),
+])
+def test_return_date_from_fpl_news(news, expected):
+    assert png.return_date(news, date(2026, 11, 15)) == expected
+
+
+def test_horizon_availability_follows_the_return_date_in_the_news():
+    days = [date(2026, 11, 21), date(2026, 11, 28), date(2026, 12, 2), date(2026, 12, 5)]
+
+    def horizon(status, back, dates=days):
+        return [png.horizon_availability(status, 0.0, step, back=back, dates=dates) for step in (1, 2, 3, 4)]
+
+    # Injured until 1 Dec: out for the first two gameweeks, then half and three quarters
+    assert horizon("i", date(2026, 12, 1)) == [0.0, 0.0, 0.5, 0.75]
+    # Back before the second gameweek: half, three quarters, then full
+    assert horizon("i", date(2026, 11, 25)) == [0.0, 0.5, 0.75, 1.0]
+    # A long injury: nothing in the whole horizon
+    assert horizon("i", date(2027, 1, 20)) == [0.0, 0.0, 0.0, 0.0]
+    # A ban ends on its day: full from then on
+    assert horizon("s", date(2026, 11, 22)) == [0.0, 1.0, 1.0, 1.0]
+    assert horizon("s", date(2026, 12, 1)) == [0.0, 0.0, 1.0, 1.0]
+    # A date that has already passed while he is still flagged says nothing: the fitted factors
+    assert horizon("i", date(2026, 11, 14)) == [0.0, 0.25, 0.35, 0.65]
+    assert horizon("i", date(2026, 11, 21)) == [0.0, 0.25, 0.35, 0.65]
+    # No dates for his club's gameweeks: the fitted factors too
+    assert horizon("i", date(2026, 12, 1), dates=[]) == [0.0, 0.25, 0.35, 0.65]
+    assert horizon("i", date(2026, 12, 1), dates=[days[0], None, None, None]) == [0.0, 0.25, 0.35, 0.65]
+    # A doubt with a date keeps its fitted factors (the date belongs to players who are out)
+    assert [png.horizon_availability("d", 75.0, step, back=date(2026, 12, 1), dates=days)
+            for step in (1, 2, 3)] == pytest.approx([0.91, 0.9, 0.9])
+    # A player who left never returns, whatever the news says
+    assert [png.horizon_availability("u", None, step, back=date(2026, 11, 25), dates=days)
+            for step in (1, 2, 3)] == [0.0, 0.0, 0.0]
+
+
+def test_gameweek_days_are_each_clubs_first_kickoff():
+    by_team = {"Arsenal": [{"kickoff_time": "2026-11-03T19:45:00Z"}, {"kickoff_time": "2026-10-31T15:00:00Z"}],
+               "Leeds": [{"kickoff_time": None}]}
+    days, deadline = png.gameweek_days(by_team, "2026-10-31T13:30:00Z")
+    assert days == {"Arsenal": date(2026, 10, 31)} and deadline == date(2026, 10, 31)
+    assert png.gameweek_days({}, None) == ({}, None)
+
+
+def test_later_gameweeks_are_scored_as_available():
+    """A gameweek after the next one is predicted with an unflagged player's availability features:
+    the flag is about the next deadline, and horizon_availability carries the rest."""
+    rows = pd.DataFrame({"snap_unavailable": [1.0, 0.0, np.nan], "snap_doubtful": [0.0, 1.0, np.nan],
+                         "snap_chance": [0.0, 50.0, np.nan], "snap_news": [1.0, 1.0, np.nan],
+                         "snap_age_days": [2.0, 2.0, np.nan], "minutes_r3": [90.0, 60.0, 0.0]})
+    out = sn.as_available(rows.copy())
+    assert out["snap_unavailable"].tolist()[:2] == [0.0, 0.0] and out["snap_doubtful"].tolist()[:2] == [0.0, 0.0]
+    assert out["snap_chance"].tolist()[:2] == [100.0, 100.0] and out["snap_news"].tolist()[:2] == [0.0, 0.0]
+    assert out.iloc[2].drop("minutes_r3").isna().all()                  # no snapshot: still none
+    assert out["snap_age_days"].tolist()[:2] == [2.0, 2.0] and out["minutes_r3"].tolist() == [90.0, 60.0, 0.0]
+    assert sn.as_available(pd.DataFrame({"value": [1.0]})).columns.tolist() == ["value"]   # v3 rows: untouched
 
 
 def test_horizon_events_stop_at_the_season_end():
@@ -572,8 +644,10 @@ def test_projections_cover_four_gameweeks_and_start_with_the_live_predictions(li
 
     pts = proj.pivot(index="name", columns="gameweek", values="predicted_points")
     assert pts.loc["Fit Gunner"].tolist() == [5.0, 10.0, 5.0, 5.0]          # GW10 double summed
-    assert pts.loc["Doubtful Blue"].tolist() == [round(2.5 * 0.77, 2), 5.0, 2.5, 2.5]   # a 50% doubt in GW9 only
-    assert pts.loc["Injured Gunner"].tolist() == [0.0, 3.0, 3.0, 3.0]       # out, half (of a double), full
+    # A 50% doubt lingers: x0.7 of the GW10 double, x0.75, then full
+    assert pts.loc["Doubtful Blue"].tolist() == pytest.approx([round(2.5 * 0.77, 2), 3.5, 1.88, 2.5], abs=0.006)
+    # Out with no return date in his news: x0.25 of the double, x0.35, x0.65
+    assert pts.loc["Injured Gunner"].tolist() == pytest.approx([0.0, 1.5, 1.05, 1.95])
     assert pts.loc["Gone Gunner"].tolist() == [0.0, 0.0, 0.0, 0.0]
     assert pts.loc["Blank Tiger"].tolist() == [2.75, 0.0, 2.75, 2.75]       # Hull City blank in GW10
     rows = proj.set_index(["name", "gameweek"])
@@ -581,7 +655,7 @@ def test_projections_cover_four_gameweeks_and_start_with_the_live_predictions(li
     assert rows.loc[("Fit Gunner", 10), "fixtures"] == 2
     assert rows.loc[("Blank Tiger", 10), "opponents"] == png.NO_FIXTURE_OPPONENT
     assert rows.loc[("Blank Tiger", 10), "fixtures"] == 0
-    assert rows.loc[("Injured Gunner", 10), "availability"] == 0.5
+    assert rows.loc[("Injured Gunner", 10), "availability"] == 0.25
     assert rows.loc[("Doubtful Blue", 9), "availability"] == 0.5          # the chance itself, for the armband
     assert rows.loc[("Fit Gunner", 11), "now_cost"] == 100 and rows.loc[("Fit Gunner", 11), "web_name"] == "Fit Gunner"
 
@@ -606,8 +680,29 @@ def test_projections_cover_four_gameweeks_and_start_with_the_live_predictions(li
     for gw in (10, 11, 12):
         assert frames[gw]["snap_age_days"].dropna().unique().tolist() == pytest.approx(age.tolist())
         assert frames[gw]["snap_unavailable"].notna().all() and frames[gw]["odds_win"].isna().all()
-    doubt = frames[11].set_index("name")
-    assert doubt.loc["Doubtful Blue", "snap_chance"] == 50 and doubt.loc["Fit Gunner", "tr_in_rank"] == 1.0
+        # ... but its flags are about GW9: later gameweeks are scored as if everyone were available
+        assert (frames[gw]["snap_unavailable"] == 0).all() and (frames[gw]["snap_chance"] == 100).all()
+    assert frames[9].set_index("name").loc["Doubtful Blue", "snap_chance"] == 50
+    assert frames[11].set_index("name").loc["Fit Gunner", "tr_in_rank"] == 1.0
+
+
+def test_projections_use_the_return_date_in_fpls_news(live_dir):
+    """GW9 kicks off on 24 Oct, GW10 on 31 Oct (Arsenal also 3 Nov), GW11 on 7 Nov, GW12 on 21 Nov."""
+    status_path = next(live_dir.glob("player_status*.csv"))
+    status = pd.read_csv(status_path)
+    status.loc[status["name"] == "Injured Gunner", "news"] = "Back injury - Expected back 5 Nov"
+    row = status["name"] == "Doubtful Blue"
+    status.loc[row, "status"], status.loc[row, "chance_of_playing_next_round"] = "s", 0.0
+    status.loc[row, "news"] = "Suspended until 26 Oct"
+    status.to_csv(status_path, index=False)
+    png.predict_next_gameweek(str(live_dir), client=HorizonClient(), history_csv=str(live_dir / "history.csv"),
+                              predict_fn=lambda f: f["value"].to_numpy() / 20.0, fetch_odds=False)
+    proj = pd.read_csv(live_dir / png.PROJECTIONS_NAME)
+    pts = proj.pivot(index="name", columns="gameweek", values="predicted_points")
+    # Out for GW9 and for GW10 (which starts before 5 Nov), half in his first gameweek back, then 0.75
+    assert pts.loc["Injured Gunner"].tolist() == pytest.approx([0.0, 0.0, 1.5, 2.25])
+    # A one-match ban: back in full for the GW10 double
+    assert pts.loc["Doubtful Blue"].tolist() == pytest.approx([0.0, 5.0, 2.5, 2.5])
 
 
 def test_failing_projections_never_touch_the_predictions(live_dir, monkeypatch):

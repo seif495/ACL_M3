@@ -28,10 +28,13 @@ Projections: the same run writes LIVE_DATA_DIR/projections.csv, every current pl
 for the next PROJECTION_HORIZON gameweeks (the ML manager's planner, services/fpl_manager_planner,
 plans transfers over them). The first gameweek is next_gw_predictions itself; each later one is
 predicted by the same model from the same pre-deadline history (one build_features call per
-gameweek, with only that gameweek's fixtures, so form, team strength, price, ownership,
-transfers and the FPL snapshot all stay as they are now), with days_rest measured to the
-team's real previous fixture, odds only where fixtures.csv already prices the match, and
-horizon_availability's rule for flagged players. A failure there is logged and never touches
+gameweek, with only that gameweek's fixtures, so form, team strength, price, ownership and
+transfers all stay as they are now), with days_rest measured to the team's real previous
+fixture and odds only where fixtures.csv already prices the match. FPL's flags are about the
+next deadline, so later gameweeks are scored as if every player were available and then scaled
+by horizon_availability: 0 until the return date in FPL's news ("Expected back 6 Dec",
+"Suspended until 22 Nov"), else the share of their points flagged players really scored one to
+three gameweeks on (ml.snapshots.HORIZON_POINTS). A failure there is logged and never touches
 the predictions.
 
 Shadow: the same run also scores the previous production model, v3 (LIVE_DATA_DIR/models/
@@ -62,11 +65,12 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from bisect import bisect_left
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from datetime import date, datetime, timezone
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -161,25 +165,71 @@ def availability_factor(status: Any, chance_next: Any) -> float:
     return float(sn.points_factor(chance_of_playing(status, chance_next)))
 
 
+# FPL's news for a player who is out: "Hamstring injury - Expected back 6 Dec", "Suspended until
+# 22 Nov" (no year), or "Knee injury - Unknown return date"
+_RETURN_DATE = re.compile(r"\b(?:expected back|until)\s+(\d{1,2})\s+([A-Za-z]{3})[a-z]*\b", re.IGNORECASE)
+_MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct",
+                                       "nov", "dec"), start=1)}
+# Share of his points an injured player gets in his first and second gameweek back, when FPL's
+# news dates his return (then full). Not fitted: the snapshots keep no news text. It follows the
+# shape of ml.snapshots.HORIZON_POINTS (a returning player starts on the bench or plays part of a
+# match). A ban ends on its date, so a suspended player is back in full.
+RETURN_RAMP = (0.5, 0.75)
+
+
+def return_date(news: Any, today: date) -> Optional[date]:
+    """The day FPL's news expects a player back, None when it gives none. The news has no year:
+    it is the one that puts the day closest to `today`."""
+    match = _RETURN_DATE.search(news) if isinstance(news, str) else None
+    month = _MONTHS.get(match.group(2).lower()) if match else None
+    if month is None:
+        return None
+    options = []
+    for year in (today.year - 1, today.year, today.year + 1):
+        try:
+            options.append(date(year, month, int(match.group(1))))
+        except ValueError:
+            continue
+    return min(options, key=lambda d: abs((d - today).days)) if options else None
+
+
 def horizon_availability(status: Any, chance_next: Any, step: int,
-                         factor: Callable[[Any, Any], float] = availability_factor) -> float:
+                         factor: Callable[[Any, Any], float] = availability_factor,
+                         back: Optional[date] = None, dates: Sequence[Optional[date]] = ()) -> float:
     """Availability for the gameweek `step` gameweeks ahead (1 = the next one, `factor` itself:
     availability_factor's points multiplier, or chance_of_playing for the chance of playing).
-    FPL's flag describes the next gameweek only, so later:
+    FPL's flag describes the next gameweek only, and later gameweeks are projected as if the player
+    were fit (ml.snapshots.as_available), so this carries all of his availability there:
 
       * u (left / unavailable) and n (not in squad): 0 in every gameweek;
-      * ruled out now (availability_factor 0: i/s with chance 0 or none given): half in the
-        second gameweek, then full;
-      * a 25/50/75% doubt counts for the next gameweek only.
+      * FPL's news dates his return (`back`, from return_date) after the next gameweek: 0 for
+        gameweeks before that day, then RETURN_RAMP for an injured player's first two gameweeks
+        back and full after (a ban ends on its day: full at once). `dates` are the days of the
+        horizon's gameweeks for his club, the next one first (his club's first kickoff, else the
+        deadline; None when unknown);
+      * no date ("Unknown return date", a doubt, or a date that has already passed): the fitted
+        ml.snapshots.HORIZON_POINTS for his flag, e.g. 0.25 / 0.35 / 0.65 when injured and
+        0.85 / 1 / 1 when suspended.
     """
     now = factor(status, chance_next)
     if step <= 1:
         return now
-    if isinstance(status, str) and status.strip().lower() in ("u", "n"):
+    code = status.strip().lower() if isinstance(status, str) else "a"
+    if code in ("u", "n"):
         return 0.0
-    if now == 0.0:
-        return 0.5 if step == 2 else 1.0
-    return 1.0
+    chance = chance_of_playing(status, chance_next)
+    if not chance < 1.0:
+        return 1.0
+    dated = (back is not None and chance <= 0.0 and len(dates) >= step
+             and dates[0] is not None and dates[step - 1] is not None and back > dates[0])
+    if dated:
+        if dates[step - 1] < back:
+            return 0.0
+        if code == "s":
+            return 1.0
+        played = sum(1 for d in dates[1:step] if d is not None and d >= back)    # this gameweek included
+        return RETURN_RAMP[played - 1] if played <= len(RETURN_RAMP) else 1.0
+    return sn.horizon_points(code, chance, step - 1)
 
 
 def describe_fixtures(entries: List[Dict[str, Any]]) -> Tuple[str, bool, str]:
@@ -543,9 +593,10 @@ def project_points(players: pd.DataFrame, history: pd.DataFrame,
 
     Built like the next gameweek's (model_rows: the same history, ending before the next
     gameweek, and only this gameweek's fixtures), so every input stays as it is now: form, team
-    strength, price, ownership and transfer ranks, and the FPL snapshot (the status file), whose
-    age is held at the next gameweek's (`snapshot_age`): training never saw a snapshot older
-    than the previous deadline. days_rest, which would otherwise count from the player's last
+    strength, price, ownership and transfer ranks. The FPL snapshot (the status file) is about the
+    next deadline, so here every player is scored as available (ml.snapshots.as_available; the
+    caller's horizon_availability scales a flagged player), and its age is held at the next
+    gameweek's (`snapshot_age`): training never saw a snapshot older than the previous deadline. days_rest, which would otherwise count from the player's last
     match in the history (before the next gameweek), is the gap to his team's previous fixture on
     FPL's list (a player without any earlier match keeps NaN for his first, as in training). Odds are whatever fixtures.csv prices before
     this gameweek's deadline, usually none.
@@ -553,6 +604,7 @@ def project_points(players: pd.DataFrame, history: pd.DataFrame,
     rows = model_rows(players, history, fixtures_by_team, season, gameweek, extras)
     if rows.empty:
         return {}
+    sn.as_available(rows)
     gap = pd.Series([rest_days(t, k, kickoffs) for t, k in zip(rows["team"], rows["kickoff_time"])],
                     index=rows.index, dtype=float)
     rows["days_rest"] = gap.where(rows["days_rest"].notna() & gap.notna(), rows["days_rest"])
@@ -562,16 +614,39 @@ def project_points(players: pd.DataFrame, history: pd.DataFrame,
     return {str(int(k)): float(v) for k, v in points.groupby(rows["element"]).sum().items()}
 
 
+def gameweek_days(fixtures_by_team: Dict[str, List[Dict[str, Any]]], deadline: Any = None
+                  ) -> Tuple[Dict[str, date], Optional[date]]:
+    """({club: the day of its first kickoff this gameweek}, the deadline's day or None): what
+    horizon_availability compares the return dates in FPL's news with."""
+    def day(value: Any) -> Optional[date]:
+        stamp = pd.to_datetime(value, utc=True, errors="coerce") if value else pd.NaT
+        return None if pd.isna(stamp) else stamp.date()
+
+    by_team = {}
+    for team, entries in fixtures_by_team.items():
+        first = min((d for d in (day(e.get("kickoff_time")) for e in entries) if d is not None), default=None)
+        if first is not None:
+            by_team[team] = first
+    return by_team, day(deadline)
+
+
 def projection_frame(players: pd.DataFrame, gameweek: int, fixtures_by_team: Dict[str, List[Dict[str, Any]]],
-                     points: Dict[str, float], step: int) -> pd.DataFrame:
+                     points: Dict[str, float], step: int,
+                     days: Sequence[Tuple[Dict[str, date], Optional[date]]] = ()) -> pd.DataFrame:
     """PROJECTION_COLUMNS for one gameweek, one row per current player: model `points` times
     horizon_availability(step), and the chance of playing as `availability`; a blank gameweek
-    gives 0 and opponent "No fixture", a double gameweek the sum and both opponents."""
+    gives 0 and opponent "No fixture", a double gameweek the sum and both opponents. `days` are
+    gameweek_days of the horizon's gameweeks up to this one, the next gameweek first: with them a
+    return date in a player's news ("Expected back 6 Dec") decides his later gameweeks."""
     rows = []
     for p in players.itertuples(index=False):
         entries = fixtures_by_team.get(p.team) or []
-        avail = horizon_availability(p.status, p.chance_of_playing_next_round, step)
-        chance = horizon_availability(p.status, p.chance_of_playing_next_round, step, factor=chance_of_playing)
+        dates = [by_team.get(p.team, default) for by_team, default in days]
+        today = dates[0] if dates else None
+        back = return_date(getattr(p, "news", None), today) if today is not None else None
+        avail = horizon_availability(p.status, p.chance_of_playing_next_round, step, back=back, dates=dates)
+        chance = horizon_availability(p.status, p.chance_of_playing_next_round, step, factor=chance_of_playing,
+                                      back=back, dates=dates)
         pts = points.get(str(int(p.element)), 0.0) * avail if entries else 0.0
         web_name = getattr(p, "web_name", None)
         rows.append({
@@ -595,17 +670,19 @@ def build_projections(players: pd.DataFrame, history: pd.DataFrame, season: str,
     is logged and left out."""
     kickoffs = team_kickoffs(fixtures, teams)
     frames, problems = [], {}
+    days: List[Tuple[Dict[str, date], Optional[date]]] = []
     for step, event in enumerate(events, start=1):
         gameweek = int(event["id"])
         try:
             by_team = gameweek_fixtures(fixtures, gameweek, teams)
+            days.append(gameweek_days(by_team, event.get("deadline_time")))
             if step == 1:
-                frame = projection_frame(players, gameweek, by_team, {}, step)
+                frame = projection_frame(players, gameweek, by_team, {}, step, days)
                 frame["predicted_points"] = frame["element"].map(next_points).fillna(0.0).astype(float)
             else:
                 points = project_points(players, history, by_team, season, gameweek, predict_fn, extras,
                                         kickoffs, snapshot_age)
-                frame = projection_frame(players, gameweek, by_team, points, step)
+                frame = projection_frame(players, gameweek, by_team, points, step, days)
         except Exception as exc:
             logger.exception("Couldn't project GW%s; it is left out of %s", gameweek, PROJECTIONS_NAME)
             problems[gameweek] = f"failed: {exc}"[:200]

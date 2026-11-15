@@ -586,8 +586,8 @@ def rest_days(team: str, kickoff: Any, kickoffs: Dict[str, List[pd.Timestamp]]) 
 def project_points(players: pd.DataFrame, history: pd.DataFrame,
                    fixtures_by_team: Dict[str, List[Dict[str, Any]]], season: str, gameweek: int,
                    predict_fn: PredictFn, extras: Optional[pm.ExtraInputs],
-                   kickoffs: Dict[str, List[pd.Timestamp]], snapshot_age: Optional[float] = None
-                   ) -> Dict[str, float]:
+                   kickoffs: Dict[str, List[pd.Timestamp]], snapshot_age: Optional[float] = None,
+                   on_rows: Optional[Callable[[pd.DataFrame, int], None]] = None) -> Dict[str, float]:
     """element (str) -> model points for a gameweek after the next one, summed over its fixtures
     (each floored at 0), before any availability multiplier.
 
@@ -599,7 +599,8 @@ def project_points(players: pd.DataFrame, history: pd.DataFrame,
     gameweek's (`snapshot_age`): training never saw a snapshot older than the previous deadline. days_rest, which would otherwise count from the player's last
     match in the history (before the next gameweek), is the gap to his team's previous fixture on
     FPL's list (a player without any earlier match keeps NaN for his first, as in training). Odds are whatever fixtures.csv prices before
-    this gameweek's deadline, usually none.
+    this gameweek's deadline, usually none. `on_rows(rows, gameweek)` sees the prepared input rows
+    before they are scored (the season replay scores input variants on them).
     """
     rows = model_rows(players, history, fixtures_by_team, season, gameweek, extras)
     if rows.empty:
@@ -610,6 +611,13 @@ def project_points(players: pd.DataFrame, history: pd.DataFrame,
     rows["days_rest"] = gap.where(rows["days_rest"].notna() & gap.notna(), rows["days_rest"])
     if snapshot_age is not None and "snap_age_days" in rows.columns:
         rows.loc[rows["snap_age_days"].notna(), "snap_age_days"] = snapshot_age
+    if on_rows is not None:
+        on_rows(rows, gameweek)
+    return points_by_element(rows, predict_fn)
+
+
+def points_by_element(rows: pd.DataFrame, predict_fn: PredictFn) -> Dict[str, float]:
+    """element (str) -> the model's points for `rows`, each fixture floored at 0, a double summed."""
     points = pd.Series(np.clip(np.asarray(predict_fn(rows), dtype=float), 0.0, None), index=rows.index)
     return {str(int(k)): float(v) for k, v in points.groupby(rows["element"]).sum().items()}
 
@@ -662,7 +670,8 @@ def projection_frame(players: pd.DataFrame, gameweek: int, fixtures_by_team: Dic
 def build_projections(players: pd.DataFrame, history: pd.DataFrame, season: str,
                       events: List[Dict[str, Any]], fixtures: List[Dict[str, Any]], teams: Dict[int, str],
                       next_points: Dict[int, float], predict_fn: PredictFn,
-                      extras: Optional[pm.ExtraInputs] = None, snapshot_age: Optional[float] = None
+                      extras: Optional[pm.ExtraInputs] = None, snapshot_age: Optional[float] = None,
+                      on_rows: Optional[Callable[[pd.DataFrame, int], None]] = None
                       ) -> Tuple[pd.DataFrame, Dict[int, str]]:
     """(projections for `events`, {gameweek: why it's missing}). The first event's points are
     `next_points` (element -> the live predicted_points, so it equals next_gw_predictions
@@ -681,7 +690,7 @@ def build_projections(players: pd.DataFrame, history: pd.DataFrame, season: str,
                 frame["predicted_points"] = frame["element"].map(next_points).fillna(0.0).astype(float)
             else:
                 points = project_points(players, history, by_team, season, gameweek, predict_fn, extras,
-                                        kickoffs, snapshot_age)
+                                        kickoffs, snapshot_age, on_rows)
                 frame = projection_frame(players, gameweek, by_team, points, step, days)
         except Exception as exc:
             logger.exception("Couldn't project GW%s; it is left out of %s", gameweek, PROJECTIONS_NAME)

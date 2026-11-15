@@ -65,24 +65,30 @@ function time(iso: string | null): string | null {
 /** A club's matches as rows: date, opponent, score (or kickoff and difficulty), xG; each opens the match. */
 export function MatchList({ matches, empty }: { matches: TeamMatch[]; empty: string }) {
   if (!matches.length) return <p className="px-4 py-6 text-data text-fg-subtle">{empty}</p>;
+  // The list sizes itself by its own width, not the screen's: in a narrow column on a wide screen
+  // (the club page's sidebar at 1024px) the xG column squeezed the opponent's name down to "H..."
   return (
-    <ul>
+    <ul className="[container-type:inline-size]">
       {matches.map((m) => (
         <li key={m.fixture_id} className="border-b border-line last:border-0">
           <Link
             to={matchPath(m.fixture_id)}
-            className="grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent sm:grid-cols-[6rem_minmax(0,1fr)_auto_auto]"
+            className="grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent [@container(min-width:27rem)]:grid-cols-[6rem_minmax(0,1fr)_auto_auto]"
           >
             <span className="text-micro text-fg-subtle">
               <span className="block font-semibold text-fg-muted">GW{m.gameweek ?? '–'}</span>
               {when(m.kickoff_time)}
+              {/* In a narrow list the kickoff time sits under the date, leaving the row to the club's name */}
+              {!m.result && time(m.kickoff_time) && (
+                <span className="block tabular-nums [@container(min-width:24rem)]:hidden">{time(m.kickoff_time)}</span>
+              )}
             </span>
             <span className="flex min-w-0 items-center gap-2">
               <span className="w-5 shrink-0 text-center text-micro font-semibold text-fg-subtle">{m.home ? 'H' : 'A'}</span>
               <ClubCrest team={m.opponent} size={22} />
               <span className="truncate text-data font-semibold text-fg">{m.opponent}</span>
             </span>
-            <span className="hidden text-right text-micro tabular-nums text-fg-subtle sm:block">
+            <span className="hidden text-right text-micro tabular-nums text-fg-subtle [@container(min-width:27rem)]:block">
               {m.xg_for != null && m.xg_against != null ? `xG ${m.xg_for.toFixed(1)}–${m.xg_against.toFixed(1)}` : ''}
             </span>
             {m.result ? (
@@ -97,7 +103,9 @@ export function MatchList({ matches, empty }: { matches: TeamMatch[]; empty: str
               </span>
             ) : (
               <span className="flex items-center gap-2">
-                <span className="text-data tabular-nums text-fg-muted">{time(m.kickoff_time) ?? ''}</span>
+                <span className="hidden text-data tabular-nums text-fg-muted [@container(min-width:24rem)]:inline">
+                  {time(m.kickoff_time) ?? ''}
+                </span>
                 {m.difficulty != null && <FdrBadge difficulty={m.difficulty} />}
               </span>
             )}

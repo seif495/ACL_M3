@@ -264,7 +264,7 @@ export function PlayerComparison() {
                   label={`Player ${i + 1}`}
                   color={playerColor(i)}
                   value={d}
-                  placeholder={i === 0 ? 'e.g. Mohamed Salah' : 'Search a player'}
+                  placeholder={i === 0 && examplePairs[0] ? `e.g. ${examplePairs[0].p1.name}` : 'Search a player'}
                   disabled={!neo4jConnected}
                   error={errors[i]}
                   onChange={(v) => setDraft(i, v)}

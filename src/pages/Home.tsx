@@ -156,7 +156,7 @@ function CaptainPick() {
           <span className="truncate">{[top.team_name, oppLabel].filter(Boolean).join(' · ')}</span>
         </p>
         {rest.length > 0 && (
-          <p className="mt-1 truncate text-micro text-fg-subtle">
+          <p className="mt-1 line-clamp-2 text-micro text-fg-subtle">
             Next best: {rest.slice(0, 2).map((p) => `${shortName(p.player_name, p.web_name)} ${p.predicted_points.toFixed(1)}`).join(' · ')}
           </p>
         )}

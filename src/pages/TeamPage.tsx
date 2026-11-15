@@ -281,10 +281,15 @@ export function TeamPage() {
                 <StatCard
                   label="Home · away"
                   value={
+                    // Each record stays whole: a narrow card breaks between them, never inside one
                     <span className="text-h2">
-                      {t.stats.home.won}-{t.stats.home.drawn}-{t.stats.home.lost}
-                      <span className="text-fg-subtle"> · </span>
-                      {t.stats.away.won}-{t.stats.away.drawn}-{t.stats.away.lost}
+                      <span className="whitespace-nowrap">
+                        {t.stats.home.won}-{t.stats.home.drawn}-{t.stats.home.lost}
+                        <span className="text-fg-subtle"> ·</span>
+                      </span>{' '}
+                      <span className="whitespace-nowrap">
+                        {t.stats.away.won}-{t.stats.away.drawn}-{t.stats.away.lost}
+                      </span>
                     </span>
                   }
                   detail="Won-drawn-lost"

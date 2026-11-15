@@ -30,7 +30,8 @@ function ArticleCard({ article, lead = false }: { article: GuardianArticle; lead
         lead && 'sm:col-span-2 sm:row-span-2',
       )}
     >
-      <div className={cn('relative overflow-hidden bg-surface-2', lead ? 'aspect-[16/9]' : 'aspect-[16/10]')}>
+      {/* Beside two stacked cards (1280px up) the lead is taller than its text: the photo takes the spare height */}
+      <div className={cn('relative overflow-hidden bg-surface-2', lead ? 'aspect-[16/9] xl:aspect-auto xl:min-h-[14rem] xl:flex-1' : 'aspect-[16/10]')}>
         {article.thumbnail && imgOk ? (
           <img
             src={article.thumbnail}
@@ -46,7 +47,7 @@ function ArticleCard({ article, lead = false }: { article: GuardianArticle; lead
         )}
         <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/50 to-transparent" />
       </div>
-      <div className="flex flex-1 flex-col gap-1.5 p-3 sm:p-4">
+      <div className={cn('flex flex-1 flex-col gap-1.5 p-3 sm:p-4', lead && 'xl:flex-none')}>
         <h3 className={cn('font-display font-bold leading-snug text-fg group-hover:text-accent', lead ? 'text-h3 sm:text-h2' : 'text-body')}>
           {article.title}
         </h3>
@@ -54,7 +55,7 @@ function ArticleCard({ article, lead = false }: { article: GuardianArticle; lead
           <p className={cn('text-data text-fg-muted', lead ? 'line-clamp-3' : 'line-clamp-2')}>{article.summary}</p>
         )}
         <p className="mt-auto flex items-center gap-1.5 pt-1 text-micro text-fg-subtle">
-          <span className="font-semibold text-fg-muted">The Guardian</span>
+          <span className="shrink-0 whitespace-nowrap font-semibold text-fg-muted">The Guardian</span>
           {article.byline && <span className="truncate">· {article.byline}</span>}
           {article.published && <span className="shrink-0">· {ago(article.published)}</span>}
           <ExternalLink className="ml-auto h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -152,7 +153,8 @@ export function NewsSection({
       <div className={cn('grid gap-4', guardian.length > 0 && 'lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]')}>
         {guardian.length > 0 && (
           <div>
-            <div className="grid auto-rows-auto gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {/* Three across only from 1280px: at 1024px that left 156px for a small card's text */}
+            <div className="grid auto-rows-auto gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {guardian.map((a, i) => (
                 <ArticleCard key={a.id} article={a} lead={i === 0} />
               ))}
@@ -174,16 +176,21 @@ export function NewsSection({
           {prices.length > 0 && (
             <Card padded={false}>
               <h3 className="border-b border-line px-4 py-3 font-display text-h3 font-bold text-fg">Price changes this gameweek</h3>
-              <ul>
+              {/* Sized by its own width: in a narrow column the crest goes and the gaps tighten, so the name fits */}
+              <ul className="[container-type:inline-size]">
                 {prices.map((p) => {
                   const up = p.change > 0;
                   const inner = (
                     <>
                       <PlayerAvatar name={p.name} src={p.photo} size={32} />
                       <span className="min-w-0 flex-1 truncate text-sm font-semibold text-fg">{p.web_name ?? p.name}</span>
-                      {p.team && <ClubCrest team={p.team} size={14} />}
+                      {p.team && (
+                        <span className="hidden [@container(min-width:22rem)]:inline-flex">
+                          <ClubCrest team={p.team} size={14} />
+                        </span>
+                      )}
                       <span className="w-14 text-right text-data tabular-nums text-fg-muted">{p.price != null ? `£${p.price.toFixed(1)}m` : ''}</span>
-                      <span className={cn('inline-flex w-20 items-center justify-end gap-0.5 whitespace-nowrap text-data font-bold tabular-nums', up ? 'text-accent' : 'text-danger')}>
+                      <span className={cn('inline-flex items-center justify-end gap-0.5 whitespace-nowrap text-data font-bold tabular-nums [@container(min-width:22rem)]:w-20', up ? 'text-accent' : 'text-danger')}>
                         {up ? <ArrowUpRight className="h-4 w-4" aria-hidden="true" /> : <ArrowDownRight className="h-4 w-4" aria-hidden="true" />}
                         {up ? '+' : '−'}£{Math.abs(p.change).toFixed(1)}m
                       </span>
@@ -195,12 +202,12 @@ export function NewsSection({
                         <button
                           type="button"
                           onClick={() => dialog.openPlayer({ name: p.name, team: p.team, photo: p.photo })}
-                          className="flex w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-surface-2"
+                          className="flex w-full items-center gap-2 px-4 py-2 text-left transition-colors hover:bg-surface-2 [@container(min-width:22rem)]:gap-3"
                         >
                           {inner}
                         </button>
                       ) : (
-                        <div className="flex items-center gap-3 px-4 py-2">{inner}</div>
+                        <div className="flex items-center gap-2 px-4 py-2 [@container(min-width:22rem)]:gap-3">{inner}</div>
                       )}
                     </li>
                   );

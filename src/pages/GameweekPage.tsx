@@ -99,6 +99,8 @@ function Upcoming({ page }: { page: GameweekResponse }) {
 function Live({ page }: { page: GameweekResponse }) {
   return (
     <div className="space-y-4">
+      {/* The cards below are h3: this keeps the heading outline unbroken under the page title */}
+      <h2 className="sr-only">Live gameweek</h2>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <PlayersCard
           title="Top scorers so far"
@@ -136,6 +138,7 @@ function Recap({ page }: { page: GameweekResponse }) {
   const positions = (['GK', 'DEF', 'MID', 'FWD'] as const).filter((p) => (page.hauls[p] ?? []).length > 0);
   return (
     <div className="space-y-4">
+      <h2 className="sr-only">Gameweek recap</h2>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <PlayersCard
           title="Top 10 scorers"

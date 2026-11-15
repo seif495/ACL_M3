@@ -50,7 +50,8 @@ export function StatCard({ label, value, detail, icon, highlight, className }: S
       <p className={cn('relative mt-1 font-display text-h1 font-bold tabular-nums', highlight ? 'text-gradient' : 'text-fg')}>
         <CountingValue value={value} />
       </p>
-      {detail && <p className="relative mt-0.5 truncate text-data text-fg-muted">{detail}</p>}
+      {/* Up to two lines: in a phone's two-column grid one line cut "Squad at current prices" short */}
+      {detail && <p className="relative mt-0.5 line-clamp-2 text-data text-fg-muted">{detail}</p>}
     </div>
   );
 }

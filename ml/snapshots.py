@@ -63,6 +63,27 @@ COP = "cop_factor"
 # snapshots behind the fit are a day or two old at the deadline; refit as our own archive grows.
 DOUBT_POINTS = {0.25: 0.61, 0.5: 0.77, 0.75: 0.91}
 
+# Share of his usual points a player flagged at one deadline scores one, two and three gameweeks after
+# the flagged one, when FPL's news gives no return date (pipeline.predict_next_gw.horizon_availability,
+# for the projections of later gameweeks). Measured on players who were playing when the flag appeared
+# (135+ minutes in the previous three gameweeks) against unflagged players of the same position and
+# recent minutes: python -m scripts.analysis.horizon_availability, 2020-21..2025-26, 2026-11-15, with
+# 95% CIs resampling gameweeks:
+#   injured    0.26 [0.20, 0.34]  0.36 [0.29, 0.44]  0.66 [0.49, 0.87]   (n 520-550)
+#   suspended  0.83 [0.72, 0.95]  1.01 [0.85, 1.16]  1.07 [0.95, 1.20]   (n 320-330)
+#   25% doubt  0.49 [0.30, 0.70]  0.55 [0.38, 0.73]  0.69 [0.52, 0.91]   (n 160-170)
+#   50% doubt  0.68 [0.53, 0.87]  0.76 [0.55, 0.91]  0.99 [0.78, 1.20]   (n 200-220)
+#   75% doubt  0.91 [0.84, 1.00]  0.92 [0.85, 1.00]  0.96 [0.87, 1.05]   (n 1240-1280)
+# Rounded and capped at 1. Before this the projections left a flagged player's model inputs as
+# they were (flagged), so a one-match ban cost him about 85% of all four gameweeks.
+HORIZON_POINTS = {
+    "injured": (0.25, 0.35, 0.65),
+    "suspended": (0.85, 1.0, 1.0),
+    0.25: (0.5, 0.55, 0.7),
+    0.5: (0.7, 0.75, 1.0),
+    0.75: (0.9, 0.9, 0.95),
+}
+
 _UTC = "datetime64[ns, UTC]"
 
 
@@ -168,6 +189,36 @@ def points_factor(chance) -> np.ndarray:
     steps = sorted(DOUBT_POINTS)
     return np.interp(np.asarray(chance, dtype=float), [0.0] + steps + [1.0],
                      [0.0] + [DOUBT_POINTS[s] for s in steps] + [1.0])
+
+
+def horizon_points(status, chance: float, ahead: int) -> float:
+    """HORIZON_POINTS for one player: `chance` is his chance of playing the flagged gameweek on
+    cop_factor's 0..1 scale, `ahead` the gameweeks after it (1 = the one right after; past the
+    table its last value). 1 without a flag, 0 for a player who left (u) or isn't in the squad (n)."""
+    status = str(status or "a").strip().lower() or "a"
+    if status in ("u", "n"):
+        return 0.0
+    if not chance < 1.0:                       # no flag (or NaN)
+        return 1.0
+    if chance <= 0.0:
+        key = "suspended" if status == "s" else "injured"
+    else:
+        key = min((k for k in HORIZON_POINTS if not isinstance(k, str)), key=lambda k: abs(k - chance))
+    table = HORIZON_POINTS[key]
+    return float(table[min(max(int(ahead), 1), len(table)) - 1])
+
+
+def as_available(rows: pd.DataFrame) -> pd.DataFrame:
+    """`rows` (a build_features table) with the availability features of an unflagged player, where
+    a snapshot gave them: how a gameweek after the next one is projected, since FPL's flag is about
+    the next deadline only (the horizon factor then says how likely he is to be back). In place."""
+    if "snap_unavailable" not in rows.columns:
+        return rows
+    has = rows["snap_unavailable"].notna()
+    for col, value in (("snap_unavailable", 0.0), ("snap_doubtful", 0.0), ("snap_chance", 100.0), ("snap_news", 0.0)):
+        if col in rows.columns:
+            rows.loc[has, col] = value
+    return rows
 
 
 def cop_factor(status, chance) -> np.ndarray:

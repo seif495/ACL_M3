@@ -47,7 +47,7 @@ from graph.data_loader import FPLDataLoader
 from preprocessing.intent_classifier import IntentClassifier, Intent, is_team_squad_question
 from services import fixture_picks
 from services import player_outlook, transfer_advice
-from services import answer_sources, fixture_runs, my_team_assistant
+from services import answer_sources, assistant_facts, fixture_runs, my_team_assistant
 from preprocessing.entity_extractor import EntityExtractor
 # LAZY IMPORT: EmbeddingManager only when needed to avoid transformer/Keras dependency
 # from embeddings.embedding_manager import EmbeddingManager
@@ -1906,6 +1906,7 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
         projection_weeks: List[int] = []
         team_payload: Optional[Dict[str, Any]] = None
         special = False
+        my_kind = None
         if transfer is None and not (squad or per_fixture) and intent_result.intent != Intent.TEAM_OF_THE_WEEK:
             my_kind = my_team_assistant.question_kind(request.question)
             run_kind = None
@@ -1962,6 +1963,27 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
                 params.pop("team_name", None)
                 if len(teams) == 1:
                     params["team_name"] = teams[0]
+
+        # "Is Saka injured?", "When is the deadline?", "Where are Arsenal in the table?", "Who will
+        # win the league?", "How does bonus work?", "Best defenders under 5.0m": this season's
+        # facts from the site's own data (services/assistant_facts.py), whatever intent the wording
+        # scored. Facts that answer the question on their own replace the intent's Cypher query.
+        site_ctx: Optional[str] = None
+        facts: List[assistant_facts.Fact] = []
+        if (transfer is None and not (squad or per_fixture or special) and my_kind is None
+                and intent_result.intent != Intent.TEAM_OF_THE_WEEK):
+            facts = await asyncio.to_thread(
+                assistant_facts.gather, request.question, conn, players=entities.players, teams=entities.teams,
+                positions=entities.positions, intent=intent_result.intent.value, gameweek=params.get("gameweek"),
+                predictions=get_predictions_df(), seasons=entities.seasons)
+        if facts:
+            site_ctx = assistant_facts.context(facts)
+            if assistant_facts.uses_predictions(facts):
+                used["predictions"] = True
+            if assistant_facts.replaces_query(facts):
+                special = True
+                intent_result.intent = Intent.SITE_DATA
+                params.setdefault("season", CURRENT_SEASON)
 
         # Several players weighed over the coming gameweek ("Is he a better captain than
         # Haaland this week?"): every one's forecast goes to the LLM, and they're compared on
@@ -2224,6 +2246,7 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
                 transfer_context=ml_context if transfer is not None else None,
                 team_context=team_ctx,
                 fixture_context=fixture_ctx,
+                site_context=site_ctx,
             )
 
         # "Based on: ..." from what this answer actually used
@@ -2242,11 +2265,12 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
             predictions_mtime=answer_sources.file_mtime(predictions_path()) if used.get("predictions") else None,
             projection_weeks=projection_weeks,
             team_gameweek=(team_payload or {}).get("based_on_gameweek"))
+        sources += [s for s in assistant_facts.sources(facts) if s not in sources]
 
         return PreparedAnswer(
             intent=intent_result.intent, query_method=query_method, params=params, entities=entities,
             results=results, executed_query=executed_query, cypher_context=cypher_context,
-            ml_context="\n\n".join(c for c in (ml_context, team_ctx, fixture_ctx) if c) or None,
+            ml_context="\n\n".join(c for c in (ml_context, team_ctx, fixture_ctx, site_ctx) if c) or None,
             embedding_context=embedding_context, embedding_used=embedding_used,
             prompt=prompt, cards_task=cards_task, sources=sources, note=note,
         )

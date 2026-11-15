@@ -1783,6 +1783,16 @@ def plan(ctx: CardContext) -> List[Awaitable[Any]]:
         if players:
             return [build_player_card(ctx, players[0], ctx.current_season, emphasis="prediction")]
         return []
+    if intent == "site_data":
+        # Answered from this season's facts (services/assistant_facts.py): the named players with
+        # their predictions on top, else the one club the question is about
+        if len(players) >= 2:
+            return [build_comparison_card(ctx, players[:2], ctx.current_season, emphasis="prediction")]
+        if players:
+            return [build_player_card(ctx, players[0], ctx.current_season, emphasis="prediction")]
+        if params.get("team_name"):
+            return [build_team_card(ctx, params["team_name"])]
+        return []
     if intent == "prediction":
         if len(players) >= 2:
             return [build_comparison_card(ctx, players[:2], season or ctx.current_season, emphasis="prediction")]

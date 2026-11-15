@@ -57,6 +57,10 @@ class Intent(Enum):
     MY_TEAM = "my_team"
     CHIP_ADVICE = "chip_advice"
     FIXTURE_RUN = "fixture_run"
+    # Also set by the API: a question answered from the site's current-season data rather than a
+    # Cypher query (services/assistant_facts.py: availability, deadlines, the table, forecasts,
+    # FPL's rules, prices and ownership, the model itself)
+    SITE_DATA = "site_data"
 
     # Trivia
     TRIVIA = "trivia"
@@ -127,14 +131,18 @@ class IntentClassifier:
             ],
             
             Intent.PLAYER_SEARCH: [
-                r"(?:find|search|look(?:ing)? for|who is)\s+(?:player\s+)?(\w+(?:\s+\w+)?)",
+                # A name follows, not a description: "who is the best goalkeeper to own", "who is in
+                # form" and "who is top of the league" aren't name searches
+                r"(?:find|search|look(?:ing)? for|who is)\s+(?!(?:the|a|an|in|on|top|best|most|going|likely)\b)"
+                r"(?:player\s+)?(\w+(?:\s+\w+)?)",
                 r"players? (?:named?|called)\s+(\w+(?:\s+\w+)?)",
             ],
             
             Intent.TOP_SCORERS: [
                 r"top\s+(?:\d+\s+)?(?:goal\s*)?scorers?",
                 r"most goals?",
-                r"who scored (?:the )?most",
+                # "who scored the most points" is TOP_POINTS: it ranked by goals here
+                r"who scored (?:the )?most(?!\s+(?:fpl\s+)?points)",
                 r"leading (?:goal\s*)?scorers?",
                 r"highest (?:goal\s*)?scorers?",
                 r"goals? leaders?",
@@ -210,20 +218,23 @@ class IntentClassifier:
             Intent.CLEAN_SHEETS: [
                 r"clean\s*sheets?",
                 r"most clean\s*sheets?",
-                r"best (?:defenders?|goalkeepers?|gk)",
+                # not "best goalkeeper to own": that asks about the coming gameweeks (PREDICTION)
+                r"best (?:defenders?|goalkeepers?|gk)\b(?!\s+to\s+(?:own|buy|pick|have|get|start|bring in|sign)\b)",
                 r"(?:defenders?|goalkeepers?|gk) (?:with\s+)?most (?:clean\s*sheets?|points)",
             ],
             
             Intent.BONUS_POINTS: [
                 r"bonus\s*(?:points?)?",
-                r"bps",
+                r"\bbps\b",
                 r"most bonus",
                 r"bonus (?:leaders?|magnets?)",
             ],
-            
+
             Intent.ICT_INDEX: [
-                r"ict\s*(?:index)?",
-                r"influence|creativity|threat",
+                # Whole words: "ict" is inside "prediction" and "predicted", which sent every
+                # "what is your prediction based on?" to the ICT leaders
+                r"\bict\b\s*(?:index)?",
+                r"\b(?:influence|creativity|threat)\b",
                 r"highest ict",
                 r"best ict",
             ],
@@ -262,6 +273,12 @@ class IntentClassifier:
                 r"points? (?:for|in) (?:next|upcoming) (?:gw|gameweek)",
                 r"(?:how many|what) points? (?:will|do you think|is|are|can|might) (?:he|she|they|him|her|\w+)?\s*(?:gonna|going to)? (?:earn|get|score|make)",
                 r"(?:will|do you think|can|might) (?:he|she|they|\w+)\s*(?:get|score|earn|make) (?:any\s+)?points?",
+                # "Who is the best goalkeeper to own?" asks about the coming gameweeks, not a name search
+                r"\b(?:best|top|good)\s+(?:gks?|goalkeepers?|keepers?|defenders?|midfielders?|forwards?|strikers?|players?|options?)"
+                r"\s+to\s+(?:own|buy|pick|have|get|start|bring in|sign)\b",
+                # "Will Haaland score this week?", "Is Saka going to haul?"
+                r"\b(?:will|can|might|could)\s+[\w'-]+(?:\s+[\w'-]+)?\s+(?:score|haul|return|blank|get (?:a|an) (?:goal|assist|clean sheet))\b",
+                r"\b(?:is|are)\s+[\w'-]+(?:\s+[\w'-]+)?\s+(?:going to|likely to|expected to)\s+(?:score|haul|return|blank|start|play)\b",
             ],
             
             Intent.TRIVIA: [
@@ -471,6 +488,7 @@ class IntentClassifier:
             Intent.MY_TEAM: None,  # services/my_team_assistant.py, in api_main.py
             Intent.CHIP_ADVICE: None,  # services/my_team_assistant.py, in api_main.py
             Intent.FIXTURE_RUN: None,  # services/fixture_runs.py, in api_main.py
+            Intent.SITE_DATA: None,  # services/assistant_facts.py, in api_main.py
         }
         
         return intent_to_query.get(intent, "")
@@ -499,6 +517,8 @@ class IntentClassifier:
             Intent.MY_TEAM: "Advise on your own FPL team (captain, transfers, bench) by its team ID",
             Intent.CHIP_ADVICE: "When to play a chip (bench boost, triple captain, free hit, wildcard)",
             Intent.FIXTURE_RUN: "Clubs' coming fixture difficulty, or the best players over the next gameweeks",
+            Intent.SITE_DATA: "This season's facts: injuries, deadlines, the table, forecasts, FPL's rules, "
+                              "prices and ownership, and how the model works",
             Intent.TRIVIA: "Play FPL trivia",
             Intent.RECOMMENDATION: "Get player recommendations",
             Intent.SEASON_SUMMARY: "Get season overview and statistics",

@@ -38,6 +38,24 @@ _STOPWORDS = {
     "young", "city", "united", "town", "rovers", "wanderers", "athletic", "albion",
 }
 
+# Everyday words of chat questions that sit one typo from a surname and share its first letter
+# ("there" -> Thiers, "start" -> Stuart): never typo-corrected into a player in free text. An
+# exact surname still matches ("white", "wood"), and the search box corrects any word.
+_COMMON_WORDS = {
+    "there", "their", "these", "those", "think", "thing", "things", "three", "other", "another",
+    "after", "before", "until", "since", "while", "still", "every", "first", "second", "third",
+    "start", "starts", "started", "starting", "bench", "benched", "going", "gonna", "right",
+    "worth", "money", "budget", "cheap", "cheaper", "chance", "chances", "choice", "likely",
+    "really", "might", "maybe", "today", "tonight", "tomorrow", "weekend", "table", "title",
+    "relegated", "relegation", "injury", "injured", "injuries", "doubt", "doubtful", "deadline",
+    "wildcard", "triple", "boost", "chips", "squad", "selling", "buying", "bring", "taking",
+    "transfer", "transfers", "differential", "differentials", "owned", "ownership", "rules",
+    "model", "manager", "accurate", "rising", "falling", "double", "blank", "banned", "suspended",
+    "return", "returns", "available", "playing", "plays", "played", "facing", "faces", "winner",
+    "winning", "wins", "beats", "draws", "loses", "result", "results", "finish", "finishes",
+    "europe", "champions", "explain", "expected", "earlier", "later", "lately", "recent", "recently",
+}
+
 _MIN_TOKEN_LEN = 4          # shorter words are too ambiguous ("son", "kai") to match alone
 _FUZZY_TOKEN_CUTOFF = 88    # typo tolerance for single words ("haland" -> "haaland")
 _FUZZY_SEARCH_CUTOFF = 80   # typo tolerance for words typed in the search box
@@ -119,6 +137,11 @@ class PlayerIndex:
         for bucket in self._by_token.values():
             bucket.sort(key=lambda e: e.popularity, reverse=True)
         self._token_vocab = [t for t in self._by_token if len(t) >= _MIN_TOKEN_LEN]
+        # A typo almost always keeps the first letter ("haland", "sallah"), while an ordinary word
+        # one letter from a surname usually doesn't ("right" isn't Wright, "there" isn't Mathers)
+        self._vocab_by_initial: Dict[str, List[str]] = {}
+        for token in self._token_vocab:
+            self._vocab_by_initial.setdefault(token[0], []).append(token)
 
     @classmethod
     def load(cls, conn) -> "PlayerIndex":
@@ -262,8 +285,8 @@ class PlayerIndex:
             if any(start < c[1] and c[0] < end for c in chosen):
                 continue
             candidates = self._by_token.get(word)
-            if not candidates and len(word) >= 5:
-                hit = process.extractOne(word, self._token_vocab, scorer=fuzz.ratio,
+            if not candidates and len(word) >= 5 and word not in _COMMON_WORDS:
+                hit = process.extractOne(word, self._vocab_by_initial.get(word[0], ()), scorer=fuzz.ratio,
                                          score_cutoff=_FUZZY_TOKEN_CUTOFF)
                 candidates = self._by_token.get(hit[0]) if hit else None
             if candidates:

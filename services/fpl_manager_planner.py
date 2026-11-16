@@ -708,7 +708,8 @@ def _player_entry(p: PoolPlayer, role: str, bench_order: Optional[int], captain:
 def plan(current: Dict[str, Any], projections: pd.DataFrame, rules: Optional[Dict[str, Any]], gameweek: int,
          chips_available: Any = (), horizon: int = DEFAULT_HORIZON, *, season: Optional[str] = None,
          deadline: Optional[str] = None, now: Optional[datetime] = None, model: Optional[str] = None,
-         time_limit: float = SOLVE_TIME_LIMIT, max_hits: int = MAX_HITS_PER_GW) -> Dict[str, Any]:
+         time_limit: float = SOLVE_TIME_LIMIT, max_hits: int = MAX_HITS_PER_GW,
+         free_build: bool = False) -> Dict[str, Any]:
     """The planned gwNN.json entry (status "planned") for `gameweek`.
 
     current      {"squad": [{element, name, web_name, position, team, purchase_price,
@@ -738,11 +739,17 @@ def plan(current: Dict[str, Any], projections: pd.DataFrame, rules: Optional[Dic
     pool = build_pool(current, projections, gws)
     windows = chip_windows(chips_available, gameweek)
 
-    base = solve_plan(pool, bank, free_transfers, rules, None, time_limit, max_hits)
-    options = {chip: solve_plan(pool, bank, free_transfers, rules, chip, time_limit, max_hits)
-               for chip in CHIPS if chip in windows and chip_may_play(chip, pool, gws, base, windows)}
-    chip, chip_why = chip_decision(pool, gws, base, options, windows)
-    sol = options[chip] if chip else base
+    if free_build:
+        # The first squad (start_squad): any 15 within the budget, chosen for the whole horizon. The
+        # wildcard's solve is exactly that; no chip is recorded or spent.
+        base = solve_plan(pool, bank, free_transfers, rules, "wildcard", time_limit, max_hits)
+        options, chip, chip_why, sol = {}, None, "", base
+    else:
+        base = solve_plan(pool, bank, free_transfers, rules, None, time_limit, max_hits)
+        options = {chip: solve_plan(pool, bank, free_transfers, rules, chip, time_limit, max_hits)
+                   for chip in CHIPS if chip in windows and chip_may_play(chip, pool, gws, base, windows)}
+        chip, chip_why = chip_decision(pool, gws, base, options, windows)
+        sol = options[chip] if chip else base
     optimal = base.optimal and all(o.optimal for o in options.values())
 
     starters = opt.order_starters(_candidate(pool[i]) for i in sol.starters[0])
@@ -785,6 +792,43 @@ def plan(current: Dict[str, Any], projections: pd.DataFrame, rules: Optional[Dic
         "optimal": optimal,
         "result": None,
     }
+
+
+def start_squad(pick: Dict[str, Any], projections: pd.DataFrame, rules: Optional[Dict[str, Any]] = None,
+                horizon: int = DEFAULT_HORIZON, time_limit: float = SOLVE_TIME_LIMIT) -> Dict[str, Any]:
+    """A first squad chosen for the next `horizon` gameweeks instead of one: `pick` (the model's
+    saved one-gameweek pick, model_picks/<season>/gwNN.json's shape) with its players replaced by
+    the best 15 over the projections, in the same shape, for fpl_manager.start_entry_from_pick.
+
+    The one-gameweek pick spends the budget on that week alone (it starts players with one good
+    fixture and fills the bench with whoever is cheapest), and the manager then has one transfer a
+    week to undo it. Here the pick is only the starting point of a free rebuild: every player at
+    today's price, the whole budget, the planner's own objective (this gameweek's XI, captain and
+    bench, then the later gameweeks discounted by DECAY).
+
+    Raises what plan() raises (no projections for the gameweek, no valid squad); the caller keeps
+    the pick then."""
+    r = _rules(rules)
+    gameweek = int(pick["gameweek"])
+    squad = [{"element": int(p["element"]), "name": p.get("name"), "web_name": p.get("web_name"),
+              "position": _position(p.get("position")), "team": p.get("team"),
+              "now_cost": int(round(float(p["cost"]) * 10)), "purchase_price": int(round(float(p["cost"]) * 10)),
+              "selling_price": int(round(float(p["cost"]) * 10))} for p in pick["players"]]
+    bank = r["budget"] - sum(p["now_cost"] for p in squad)
+    entry = plan({"squad": squad, "bank": bank, "free_transfers": 1}, projections, r, gameweek, (), horizon,
+                 time_limit=time_limit, free_build=True)
+    known = {int(p["element"]): p for p in pick["players"]}
+    players = []
+    for p in sorted(entry["squad"], key=lambda p: (p["role"] != "starter", p["bench_order"] or 0)):
+        old = known.get(int(p["element"]), {})
+        players.append({
+            "element": int(p["element"]), "name": p["name"], "web_name": p.get("web_name"), "position": p["position"],
+            "team": p["team"], "cost": p["now_cost"] / 10.0, "predicted_points": p["predicted_points"],
+            "role": p["role"], "captain": bool(p["captain"]), "vice_captain": bool(p["vice_captain"]),
+            "fixtures": old.get("fixtures") or [], "opponents": old.get("opponents") or [],
+        })
+    return {**pick, "players": players, "start": {"horizon": len(entry["horizon"]), "optimal": entry["optimal"],
+                                                   "changed": len(entry["transfers"])}}
 
 
 def _model_version() -> str:

@@ -111,6 +111,9 @@ VARIANTS: Dict[str, Dict[str, Any]] = {
     "hitm2": {"set": {"HIT_MARGIN": 2.0}},
     "hitm4": {"set": {"HIT_MARGIN": 4.0}},
     "nohits": {"set": {"MAX_HITS_PER_GW": 0}},
+    # 2026-11-16: the first squad chosen over the planning horizon (planner.start_squad), not the
+    # one-gameweek predicted Team of the Week
+    "hstart": {"start": "horizon"},
     # 2026-10-31: the chip rules (services/fpl_manager_planner.chip_decision), one threshold at a
     # time each way; late_only plays a chip only when its window forces it
     "tc8": {"set": {"TRIPLE_CAPTAIN_MIN_POINTS": 8.0, "TRIPLE_CAPTAIN_DOUBLE_MIN_POINTS": 6.0}},
@@ -470,11 +473,17 @@ def load_projected(prefix: str) -> Dict[str, Any]:
 
 
 def start_entry(predictions: pd.DataFrame, season: str, gameweek: int, deadline: str,
-                rules: fm.Rules) -> Dict[str, Any]:
-    """The first entry: the predicted Team of the Week at `gameweek` (as the ML manager's start)."""
+                rules: fm.Rules, projections: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+    """The first entry: the predicted Team of the Week at `gameweek` (as the ML manager's start),
+    or with `projections` the squad planner.start_squad builds from it for the whole horizon."""
     selection, details = ss.predicted_selection(predictions.to_dict("records"))
     pick = mr.build_picks(selection, details, season, gameweek, deadline, {}, archived_at=deadline,
                           model="replay")
+    if projections is not None:
+        try:
+            pick = planner.start_squad(pick, projections, rules.to_dict())
+        except Exception as exc:  # noqa: BLE001 - as live: the one-gameweek pick starts the season
+            log(f"  horizon start failed for {season} GW{gameweek}, keeping the pick: {exc}")
     return fm.start_entry_from_pick(pick, deadline, now=pd.Timestamp(deadline) - timedelta(hours=2),
                                     rules=rules, start_gameweek=gameweek)
 
@@ -509,7 +518,9 @@ def play_season(data: Dict[str, Any], variant: str, start_gw: int = 1, rules: fm
             started, problems = time.perf_counter(), []
             if state is None:
                 state = fm.new_state(season, rules, gw)
-                entry = start_entry(preds[preds["deadline_gw"] == gw], season, gw, deadline, rules)
+                horizon_start = spec.get("start") == "horizon"
+                entry = start_entry(preds[preds["deadline_gw"] == gw], season, gw, deadline, rules,
+                                    proj[proj["deadline_gw"] == gw].drop(columns="deadline_gw") if horizon_start else None)
             else:
                 current = fm.squad_at_prices(state, prices[gw], rules)
                 chips = fm.chip_deadlines(rules, state["chips_used"], gw) if spec.get("chips", True) else {}

@@ -333,3 +333,36 @@ def test_input_variant_quality_compares_with_base():
     assert q.loc[(1, "better"), "rmse"] < q.loc[(1, "base"), "rmse"]
     assert q.loc[(1, "better"), "rmse_hi"] < 0 < q.loc[(1, "better"), "top_lo"]      # reliably better on both
     assert np.isnan(q.loc[(1, "base"), "rmse_vs_base"])
+
+
+# ------------------------------------------------------------------ the first squad over the horizon (hstart)
+
+def test_horizon_start_buys_for_the_coming_gameweeks():
+    data = synthetic_season()
+    gw = GWS[0]
+    deadline = data["summary"]["deadlines"][str(gw)]
+    preds = data["predictions"][data["predictions"]["deadline_gw"] == gw]
+    proj = data["projections"][data["projections"]["deadline_gw"] == gw].drop(columns="deadline_gw")
+    one_week = mrp.start_entry(preds, SEASON, gw, deadline, mrp.fm.DEFAULT_RULES)
+    over_horizon = mrp.start_entry(preds, SEASON, gw, deadline, mrp.fm.DEFAULT_RULES, proj)
+    names = lambda entry: {p["name"] for p in entry["squad"]}  # noqa: E731
+    assert len(over_horizon["squad"]) == 15 and over_horizon["transfers"] == [] and over_horizon["chip"] is None
+    assert over_horizon["bank_after"] >= 0
+    # P25 is the one player projected well for the next four gameweeks (5.0 against 2.0)
+    assert "P25" in names(over_horizon)
+    captain = next(p for p in over_horizon["squad"] if p["captain"])
+    assert captain["name"] == "P25" and captain["role"] == "starter"
+    assert len({p["element"] for p in over_horizon["squad"]}) == 15
+    assert one_week["gameweek"] == over_horizon["gameweek"] == gw
+
+
+def test_hstart_plays_a_season_and_a_failed_build_keeps_the_pick(monkeypatch):
+    data = synthetic_season()
+    res = mrp.play_season(data, "hstart")
+    assert [g["gameweek"] for g in res["gameweeks"] if not g.get("void")] == GWS
+    assert not any(g["problems"] for g in res["gameweeks"])
+
+    def broken(*args, **kwargs):
+        raise ValueError("no projections")
+    monkeypatch.setattr(planner, "start_squad", broken)
+    assert mrp.play_season(data, "hstart")["gameweeks"][0]["points"] == mrp.play_season(data, "default")["gameweeks"][0]["points"]

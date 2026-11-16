@@ -240,6 +240,7 @@ FirstMessage: {str(is_first_message)}
 - NEVER ignore ML Predictions when they are present - they are the most important data for future performance questions.
 - A ranked ML list is in order, best first. When you name a second choice or an alternative, it is the next entry in that order; for a position ("a midfield option"), it is that position's highest-ranked entry. Never skip a higher-ranked player for a better-known one, and never call a player "next" when someone is ranked between them.
 - A predicted number is an average, not a promise. When a line says what that number has meant (the usual range), you may add it in a few words ("usually 1-12"); never present a prediction as certain.
+- Nobody knows the line-ups before the deadline. When a player's block has a "Line-up" line and he is a rotation risk or unlikely to start, say so in a few words; don't mention it for a nailed player unless asked.
 - When the ML Predictions list several players, compare them on their own numbers. Never say a player has no forecast when he has a line above; only a player whose entry says he is not in the current FPL game has none.
 {transfer_rules}{team_rules}{site_rules}{language_rule}
 **SCOPE:**

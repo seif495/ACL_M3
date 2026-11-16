@@ -438,6 +438,8 @@ export interface MLPrediction {
   confidence_interval?: [number, number];
   /** What players predicted this much actually scored: 10th-90th percentile, chance of 6+ and of 10+. */
   usual_range?: UsualRange | null;
+  /** How often players with his recent starts started their next match (line-ups come after the deadline). */
+  lineup?: { start_chance: number; label: string; starts_last6: number; started_last: boolean } | null;
   features_used?: Record<string, unknown>;
   model_version: string;
   team_name?: string | null;

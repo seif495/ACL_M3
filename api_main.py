@@ -63,6 +63,7 @@ from services.predictions import get_predictions_df, predictions_path
 from services import predictions as predictions_service
 from services import season_service
 from services import prediction_ranges
+from services import lineup_risk
 from services import model_review
 from services import answer_cards
 from services import analytics
@@ -565,6 +566,8 @@ async def get_top_performers_csv(position: Optional[str] = None, limit: int = Qu
                 "fixture_context": fixture_context,
                 # Where players predicted this much have landed: the number is an average
                 "usual_range": prediction_ranges.outcome(row['predicted_points']),
+                # How often players with his recent starts started next (line-ups come after the deadline)
+                "lineup": lineup_risk.for_element(row.get('element')),
                 **_availability_fields(row),
             }
             if projected:

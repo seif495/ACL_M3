@@ -154,6 +154,15 @@ function PlayerCell({
           <>
             <PositionBadge position={row.position} className="w-8" />
             <StatusBadge status={row.status} chance={row.chance_of_playing_next_round} news={row.news} />
+            {row.lineup && row.lineup.start_chance < 0.6 && (!row.status || row.status === 'a') && (
+              // Fit, but not a regular starter lately: the prediction leans on him playing
+              <span
+                className="rounded-sm border border-line px-1.5 py-0.5 text-micro font-semibold uppercase text-fg-muted"
+                title={`Players with his recent starts started their next match ${Math.round(row.lineup.start_chance * 100)}% of the time`}
+              >
+                {row.lineup.label === 'unlikely to start' ? 'Bench risk' : 'Rotation risk'}
+              </span>
+            )}
           </>
         }
       />
@@ -688,6 +697,12 @@ export function Predictions() {
                 The 4-gameweek view adds each player's projected points for the coming gameweeks from the same model run, with availability fading further ahead.
               </li>
               <li>Injured and suspended players are predicted 0; doubtful players are scaled by their chance of playing.</li>
+              <li>
+                Line-ups come out after the deadline, so no prediction knows them. A fit player who hasn't been starting
+                lately is marked <span className="font-semibold text-fg">Rotation risk</span> or{' '}
+                <span className="font-semibold text-fg">Bench risk</span>, from how often players with the same recent starts
+                started their next match.
+              </li>
               <li>Official FPL team news for doubtful or unavailable players is shown under their name.</li>
             </ul>
           </Card>

@@ -145,7 +145,8 @@ def fresh_cache(tmp_path, monkeypatch):
     ("Predict Arsenal v Chelsea", {"teams": ["Arsenal", "Chelsea"], "intent": "head_to_head"}, ["match_forecast"]),
     ("Will Arsenal win this weekend?", {"teams": ["Arsenal"]}, ["match_forecast"]),
     ("Who are the best predicted Arsenal players?", {"teams": ["Arsenal"]}, []),   # predictions, not a result
-    ("Will Haaland's price go down?", {"players": ["Erling Haaland"]}, ["outlook"]),  # not relegation
+    ("Will Haaland's price go down?", {"players": ["Erling Haaland"]}, ["price_changes", "outlook"]),  # not relegation
+    ("Who is about to go up in price?", {}, ["price_changes"]),
     # Rules
     ("How does the bonus points system work?", {"intent": "bonus_points"}, ["rules"]),
     ("What is a free hit chip?", {}, ["rules"]),
@@ -717,3 +718,67 @@ def test_outlook_says_what_the_number_has_meant(tmp_path):
     body, prompt, _conn = run_query("What about Saka?", tmp_path)
     assert "- What that number has meant: players predicted about this much usually score" in body["ml_context"]
     assert "A predicted number is an average, not a promise" in prompt
+
+
+# ------------------------------------------------------------------ likely price changes
+
+def test_price_watch_follows_the_rates_from_past_seasons():
+    from services import price_watch as pw
+
+    assert pw.chances(250_000) == (0.82, 0.0) and pw.chances(120_000) == (0.40, 0.0)
+    assert pw.chances(-250_000) == (0.0, 0.60) and pw.chances(-30_000) == (0.0, 0.18)
+    assert pw.chances(0) == (0.0, 0.0) and pw.chances(10_000) == (0.0, 0.0)
+
+    def row(name, t_in, t_out, moved=0, status="a"):
+        return {"name": name, "web_name": name, "team": "Arsenal", "status": status, "transfers_in_event": t_in,
+                "transfers_out_event": t_out, "cost_change_event": moved}
+    rows = [row("Hot", 300_000, 20_000), row("Warm", 150_000, 30_000), row("Mild", 60_000, 5_000),
+            row("Risen", 400_000, 10_000, moved=1), row("Sold", 10_000, 260_000), row("Fallen", 5_000, 300_000, moved=-1),
+            row("Gone", 0, 500_000, status="u"), row("Quiet", 3_000, 2_000), {"name": "Old file"}]
+    out = pw.watch(rows)
+    assert [(r["name"], r["chance"]) for r in out["risers"]] == [("Hot", 0.82), ("Warm", 0.40), ("Mild", 0.17)]
+    assert [(r["name"], r["net_transfers"]) for r in out["fallers"]] == [("Sold", -250_000)]   # not the departed
+    assert pw.watch([{"name": "x"}]) == {"risers": [], "fallers": []}
+    assert [r["name"] for r in pw.watch(rows, limit=1)["risers"]] == ["Hot"]
+
+    text = af.price_watch_text(out, players=["Quiet", "Hot"])
+    assert "Likely to rise:\n- Hot (Arsenal): 82% (+280,000 net transfers so far)" in text
+    assert "Likely to fall:\n- Sold (Arsenal): 60% (-250,000 net transfers so far)" in text
+    assert "- Quiet: not among the players likely to change price this gameweek." in text
+    assert "FPL doesn't publish its rule" in text
+    assert af.price_watch_text({"risers": [], "fallers": []}) is None
+
+
+def test_insights_lists_likely_price_changes():
+    from services import insights
+
+    rows = [{"name": "Hot", "web_name": "Hot", "team": "Arsenal", "position": "MID", "status": "a", "now_cost": 80,
+             "selected_by_percent": 12.0, "transfers_in_event": 300_000, "transfers_out_event": 20_000,
+             "cost_change_event": 0, "code": 1}]
+    summary = insights.transfer_summary(rows)
+    assert summary["likely_risers"][0]["name"] == "Hot" and summary["likely_risers"][0]["chance"] == 0.82
+    assert summary["likely_risers"][0]["net_transfers"] == 280_000 and summary["likely_fallers"] == []
+    assert summary["risers"] == []
+
+
+# ------------------------------------------------------------------ line-up risk from recent starts
+
+def test_lineup_risk_reads_the_models_inputs(tmp_path):
+    from services import lineup_risk as lr
+
+    assert lr.start_chance(1.0, 1) == 0.88 and lr.start_chance(5 / 6, 1) == 0.81 and lr.start_chance(5 / 6, 0) == 0.47
+    assert lr.start_chance(0.5, 1) == 0.73 and lr.start_chance(0.0, 0) == 0.03
+    assert lr.start_chance(None, 1) is None and lr.start_chance(float("nan"), 1) is None
+    assert [lr.label(c) for c in (0.88, 0.63, 0.47, 0.03, None)] == [
+        "nailed", "usually starts", "rotation risk", "unlikely to start", None]
+    path = tmp_path / "next_gw_features.csv"
+    pd.DataFrame({"element": [1, 1, 2, 3], "started_r6": [1.0, 1.0, 0.5, None], "started_r1": [1.0, 1.0, 0.0, None],
+                  "minutes_r3": 90.0}).to_csv(path, index=False)
+    table = lr.load(str(path))
+    assert set(table) == {1, 2} and table[2]["label"] == "rotation risk" and table[1]["start_chance"] == 0.88
+    assert "started about 3 of his last 6 matches, but not the last one" in lr.describe(2, str(path))
+    assert "31% of the time (rotation risk)" in lr.describe(2, str(path))
+    assert lr.describe(3, str(path)) is None and lr.for_element("x", str(path)) is None
+    assert lr.load(str(tmp_path / "missing.csv")) == {}
+    pd.DataFrame({"element": [1]}).to_csv(tmp_path / "old.csv", index=False)      # a file without the columns
+    assert lr.load(str(tmp_path / "old.csv")) == {}

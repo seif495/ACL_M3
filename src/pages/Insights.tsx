@@ -359,7 +359,7 @@ function Differentials() {
 
 // ------------------------------------------------------------------ transfers & prices
 
-function MoveList({ title, items, unit, kind }: { title: string; items: TransferMove[]; unit: string; kind: 'transfers' | 'change' }) {
+function MoveList({ title, items, unit, kind }: { title: string; items: TransferMove[]; unit: string; kind: 'transfers' | 'change' | 'chance' }) {
   const open = useOpenPlayer();
   return (
     <Card padded={false} className="min-w-0">
@@ -378,10 +378,22 @@ function MoveList({ title, items, unit, kind }: { title: string; items: Transfer
                     {getClubAbbreviation(p.team ?? '') || p.team} · {money(p.price)} · {pct(p.selected_by_percent)} owned
                   </span>
                 </span>
-                <span className={cn('shrink-0 font-display text-body font-bold tabular-nums', kind === 'change' ? ((p.change ?? 0) > 0 ? 'text-accent' : 'text-danger') : 'text-fg')}>
-                  {kind === 'transfers' ? (p.transfers ?? 0).toLocaleString() : `${(p.change ?? 0) > 0 ? '+' : '−'}£${Math.abs(p.change ?? 0).toFixed(1)}m`}
-                  <span className="sr-only"> {unit}</span>
-                </span>
+                {kind === 'chance' ? (
+                  <span className="shrink-0 text-right">
+                    <span className="block font-display text-body font-bold tabular-nums text-fg">
+                      {Math.round((p.chance ?? 0) * 100)}%<span className="sr-only"> {unit}</span>
+                    </span>
+                    <span className="block text-micro tabular-nums text-fg-subtle">
+                      {(p.net_transfers ?? 0) > 0 ? '+' : '−'}
+                      {Math.abs(p.net_transfers ?? 0).toLocaleString()} net
+                    </span>
+                  </span>
+                ) : (
+                  <span className={cn('shrink-0 font-display text-body font-bold tabular-nums', kind === 'change' ? ((p.change ?? 0) > 0 ? 'text-accent' : 'text-danger') : 'text-fg')}>
+                    {kind === 'transfers' ? (p.transfers ?? 0).toLocaleString() : `${(p.change ?? 0) > 0 ? '+' : '−'}£${Math.abs(p.change ?? 0).toFixed(1)}m`}
+                    <span className="sr-only"> {unit}</span>
+                  </span>
+                )}
               </button>
             </li>
           ))}
@@ -407,7 +419,17 @@ function Transfers() {
             <MoveList title="Price risers" items={d.risers} unit="price rise" kind="change" />
             <MoveList title="Price fallers" items={d.fallers} unit="price fall" kind="change" />
           </div>
-          <p className="text-micro text-fg-subtle">Counts and price changes are for this gameweek so far, from FPL&rsquo;s player data.</p>
+          {((d.likely_risers?.length ?? 0) > 0 || (d.likely_fallers?.length ?? 0) > 0) && (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <MoveList title="Likely to rise before the deadline" items={d.likely_risers ?? []} unit="chance of a price rise" kind="chance" />
+              <MoveList title="Likely to fall before the deadline" items={d.likely_fallers ?? []} unit="chance of a price fall" kind="chance" />
+            </div>
+          )}
+          <p className="text-micro text-fg-subtle">
+            Counts and price changes are for this gameweek so far, from FPL&rsquo;s player data. The chances are how
+            often players with that many net transfers changed price by the deadline in past seasons: FPL doesn&rsquo;t
+            publish its rule, and early in the week the counts are still growing.
+          </p>
         </div>
       )}
     </QueryBoundary>

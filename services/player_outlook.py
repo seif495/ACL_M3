@@ -21,7 +21,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import pandas as pd
 
 from config.settings import CURRENT_SEASON
-from services import prediction_ranges
+from services import lineup_risk, prediction_ranges
 from services import answer_cards as ac
 from services import season_service as ss
 from utils.text import normalize_name
@@ -156,6 +156,7 @@ class Outlook:
     projections: List[Tuple[int, float, str]] = field(default_factory=list)
     fixtures: List[Dict[str, Any]] = field(default_factory=list)
     season: Optional[Dict[str, Any]] = None       # SEASON_TOTALS_QUERY row for this season
+    lineup: Optional[str] = None                  # how often players with his recent starts started next
 
     def projected(self, gameweeks: Iterable[int]) -> Optional[float]:
         """Projected points over these gameweeks, or None if one of them is missing."""
@@ -194,6 +195,7 @@ def build_outlook(name: str, *, predictions: Optional[pd.DataFrame], projections
         projections=projection_rows(projections, row, gameweek),
         fixtures=ac.upcoming_fixtures(fixtures, team, HORIZON) if team else [],
         season=season_row,
+        lineup=lineup_risk.describe(row.get("element")),
     )
 
 
@@ -267,6 +269,8 @@ def outlook_text(o: Outlook, season: str = CURRENT_SEASON) -> str:
     if spread:
         # The prediction is an average: this keeps the answer from sounding surer than it is
         lines.append(f"- What that number has meant: {spread}")
+    if o.lineup and o.status in ("a", "d"):
+        lines.append(f"- Line-up: {o.lineup}")
     if len(o.projections) > 1:
         first, last = o.projections[0][0], o.projections[-1][0]
         total = sum(p for _, p, _ in o.projections)

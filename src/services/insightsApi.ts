@@ -64,6 +64,9 @@ export interface TransferMove {
   selected_by_percent: number | null;
   transfers?: number;
   change?: number;
+  /** How often a player with these net transfers changed price by the deadline in past seasons (0-1). */
+  chance?: number;
+  net_transfers?: number;
 }
 
 export interface TransfersResponse {
@@ -71,6 +74,9 @@ export interface TransfersResponse {
   transfers_out: TransferMove[];
   risers: TransferMove[];
   fallers: TransferMove[];
+  /** Not moved yet this gameweek, but likely to by the deadline. Missing from an older backend. */
+  likely_risers?: TransferMove[];
+  likely_fallers?: TransferMove[];
   note: string | null;
 }
 

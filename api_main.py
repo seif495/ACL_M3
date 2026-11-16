@@ -48,6 +48,7 @@ from preprocessing.intent_classifier import IntentClassifier, Intent, is_team_sq
 from services import fixture_picks
 from services import player_outlook, transfer_advice
 from services import answer_sources, assistant_facts, fixture_runs, my_team_assistant
+from services import question_rewrite
 from preprocessing.entity_extractor import EntityExtractor
 # LAZY IMPORT: EmbeddingManager only when needed to avoid transformer/Keras dependency
 # from embeddings.embedding_manager import EmbeddingManager
@@ -59,7 +60,9 @@ except Exception:
 from services.player_index import PlayerIndex
 from services.avatars import AvatarService, ImageProxy, is_proxy_allowed, FPL_PHOTO_URL
 from services.predictions import get_predictions_df, predictions_path
+from services import predictions as predictions_service
 from services import season_service
+from services import prediction_ranges
 from services import model_review
 from services import answer_cards
 from services import analytics
@@ -456,6 +459,7 @@ class _LazyMLIntegration:
             return PredictionResponse(
                 player_name=row["name"], predicted_points=round(float(row["predicted_points"]), 2),
                 model_version=str(row.get("prediction_method", "xgboost_v3")), team_name=row["team"],
+                usual_range=prediction_ranges.outcome(row["predicted_points"]),
                 fixture_context={
                     "opponent_team": row["opponent"], "home_away": "home" if bool(row["is_home"]) else "away",
                     "match_date": row["kickoff_time"], "matchday": int(row["gameweek"]),
@@ -559,6 +563,8 @@ async def get_top_performers_csv(position: Optional[str] = None, limit: int = Qu
                 "cost": round(float(row['value']) / 10.0, 1) if pd.notna(row.get('value')) else None,
                 "model_version": row.get('prediction_method', 'xgboost_v3'),
                 "fixture_context": fixture_context,
+                # Where players predicted this much have landed: the number is an average
+                "usual_range": prediction_ranges.outcome(row['predicted_points']),
                 **_availability_fields(row),
             }
             if projected:
@@ -578,6 +584,9 @@ async def get_top_performers_csv(position: Optional[str] = None, limit: int = Qu
                 "gameweek": int(df.iloc[0]['gameweek']) if len(df) > 0 else None,
                 "horizon": len(weeks) if projected else 1,
                 "horizon_gameweeks": [w["gameweek"] for w in weeks] if projected else None,
+                "range_legend": prediction_ranges.legend(),
+                # True when this run was made before the bookmakers' prices were collected
+                "odds_pending": predictions_service.odds_pending(),
             }
         }
         
@@ -632,6 +641,7 @@ async def get_best_value_csv(position: Optional[str] = None, limit: int = Query(
                 "value_score": round(float(row['value_score']), 2),
                 "model_version": row.get('prediction_method', 'xgboost_v3'),
                 "fixture_context": fixture_context,
+                "usual_range": prediction_ranges.outcome(row['predicted_points']),
                 **_availability_fields(row),
             })
         
@@ -1787,6 +1797,9 @@ def greeting_response() -> QueryResponse:
     )
 
 
+FALLBACK_MAX_LINES = 40   # of context shown when the LLM is down (PreparedAnswer.fallback)
+
+
 @dataclass
 class PreparedAnswer:
     """A question with everything gathered except the LLM's text (see _prepare_answer)."""
@@ -1818,6 +1831,22 @@ class PreparedAnswer:
             answer = f"{answer.rstrip()}\n\n{self.note}"
         return answer
 
+    def fallback(self) -> str:
+        """The answer when the language model can't be reached (quota, outage, timeout): the data
+        it would have written from, as it is, so the question still gets its numbers. The cards
+        are built without the LLM and show either way."""
+        data = "\n\n".join(c.strip() for c in (self.ml_context, self.cypher_context)
+                           if c and c.strip() and not c.startswith(("Not used", "No relevant data")))
+        if not data:
+            return ("I can't write an answer right now: the language model isn't responding. "
+                    "Please try again in a minute.")
+        lines = data.splitlines()
+        if len(lines) > FALLBACK_MAX_LINES:
+            lines = lines[:FALLBACK_MAX_LINES] + ["…"]
+        return ("The language model isn't responding right now, so I can't put this into words. "
+                "Here is the data for your question as it stands:\n\n" + "\n".join(lines)
+                + "\n\nAsk again in a minute for a written answer.")
+
     async def response(self, answer: str) -> QueryResponse:
         cards, follow_ups = await self.cards_task
         return QueryResponse(
@@ -1838,9 +1867,12 @@ class PreparedAnswer:
         )
 
 
-async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
+async def _prepare_answer(request: QueryRequest, conn, answer_language: Optional[str] = None,
+                          original_question: Optional[str] = None) -> PreparedAnswer:
     """Steps 1-6 of the Q&A pipeline: intent, entities, the Cypher query, ML and embedding
-    context, and the prompt. The answer cards start building here, in the background."""
+    context, and the prompt. The answer cards start building here, in the background.
+    `answer_language` / `original_question`: the user's language and own words when the question
+    was translated first (services/question_rewrite.py); the answer is then written in it."""
     cards_task: Optional[asyncio.Task] = None
     try:
         # Step 1: Intent Classification (lazy load)
@@ -2119,6 +2151,9 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
                                     opponent = row['opponent']
                                     home_away = "Home" if row['is_home'] else "Away"
                                     ml_context = f"ML Prediction for {row['name']}:\n- Predicted points: {row['predicted_points']:.1f} pts\n- Next match: vs {opponent} ({home_away})\n- Gameweek: {int(row['gameweek'])}"
+                                    spread = prediction_ranges.describe(row['predicted_points'])
+                                    if spread:
+                                        ml_context += f"\n- What that number has meant: {spread}"
                                     ml_context += _availability_note(row)
                                 else:
                                     # The file covers every player in the current FPL game, so
@@ -2247,6 +2282,8 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
                 team_context=team_ctx,
                 fixture_context=fixture_ctx,
                 site_context=site_ctx,
+                answer_language=answer_language,
+                original_question=original_question,
             )
 
         # "Based on: ..." from what this answer actually used
@@ -2264,7 +2301,8 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
             used, current_season=CURRENT_SEASON, predictions_gameweek=_predictions_gameweek(predictions_now),
             predictions_mtime=answer_sources.file_mtime(predictions_path()) if used.get("predictions") else None,
             projection_weeks=projection_weeks,
-            team_gameweek=(team_payload or {}).get("based_on_gameweek"))
+            team_gameweek=(team_payload or {}).get("based_on_gameweek"),
+            odds_pending=bool(used.get("predictions")) and predictions_service.odds_pending())
         sources += [s for s in assistant_facts.sources(facts) if s not in sources]
 
         return PreparedAnswer(
@@ -2280,6 +2318,89 @@ async def _prepare_answer(request: QueryRequest, conn) -> PreparedAnswer:
         raise
 
 
+MAX_MERGED_CARDS = 4
+
+
+async def _question_parts(request: QueryRequest) -> Tuple[List[QueryRequest], Optional[str]]:
+    """([the questions to answer], the user's language when it isn't English). Usually the request
+    itself: only a message that isn't in English, or that asks two separate things, is rewritten
+    first by one short LLM call (services/question_rewrite.py); a failed rewrite changes nothing."""
+    if question_rewrite.reason(request.question) is None:
+        return [request], None
+    out = await asyncio.to_thread(question_rewrite.rewrite, request.question, app_state.get("llm_manager"),
+                                  request.chat_history)
+    if out is None:
+        return [request], None
+    parts = [request.model_copy(update={"question": q[:MAX_QUESTION_CHARS]}) for q in out.questions]
+    return parts, out.language
+
+
+def _merge_responses(responses: List[QueryResponse]) -> QueryResponse:
+    """One response for a message answered in parts: the answers in order, every part's cards
+    (the first MAX_MERGED_CARDS distinct ones), sources and context."""
+    first = responses[0]
+    if len(responses) == 1:
+        return first
+
+    def joined(values) -> str:
+        return "\n\n".join(v for v in values if v)
+
+    entities: Dict[str, Any] = {}
+    for r in responses:
+        for key, values in (r.entities or {}).items():
+            if isinstance(values, list):
+                entities.setdefault(key, [])
+                entities[key] += [v for v in values if v not in entities[key]]
+            else:
+                entities.setdefault(key, values)
+    cards, seen = [], set()
+    for card in (c for r in responses for c in r.cards):
+        key = json.dumps(card, sort_keys=True, default=str)
+        if key not in seen:
+            seen.add(key)
+            cards.append(card)
+    sources: List[str] = []
+    for r in responses:
+        sources += [s for s in r.sources if s not in sources]
+    return first.model_copy(update={
+        "answer": joined(r.answer for r in responses),
+        "entities": entities,
+        "cypher_query": joined(r.cypher_query for r in responses),
+        "kg_context": joined(r.kg_context for r in responses),
+        "ml_context": joined(r.ml_context for r in responses) or None,
+        "results": [row for r in responses for row in r.results][:50],
+        "cards": cards[:MAX_MERGED_CARDS],
+        "follow_ups": next((r.follow_ups for r in reversed(responses) if r.follow_ups), []),
+        "sources": sources,
+    })
+
+
+async def _answer_parts(parts: List[QueryRequest], language: Optional[str], request: QueryRequest,
+                        conn) -> QueryResponse:
+    """Answer each part through the normal pipeline (the LLM calls run together) and merge them."""
+    prepared: List[PreparedAnswer] = []
+    try:
+        for part in parts:
+            prepared.append(await _prepare_answer(part, conn, language, request.question))
+
+        async def write(p: PreparedAnswer) -> str:
+            if p.prompt is None:
+                return p.finish("")
+            response = await asyncio.to_thread(app_state["llm_manager"].generate, p.prompt,
+                                               model_key=request.model, timeout=60)
+            if not response.success:
+                logger.error("LLM failed for a query: %s", response.error)
+                return p.fallback()
+            return p.finish(response.text)
+
+        answers = await asyncio.gather(*(write(p) for p in prepared))
+        return _merge_responses([await p.response(a) for p, a in zip(prepared, answers)])
+    finally:
+        for p in prepared:
+            if not p.cards_task.done():
+                p.cards_task.cancel()
+
+
 @app.post("/api/query", response_model=QueryResponse, dependencies=[Depends(query_rate_limit)])
 async def query_fpl(request: QueryRequest, conn=Depends(get_neo4j_conn)):
     """Process FPL query and return answer."""
@@ -2288,7 +2409,10 @@ async def query_fpl(request: QueryRequest, conn=Depends(get_neo4j_conn)):
         return greeting_response()
     prepared: Optional[PreparedAnswer] = None
     try:
-        prepared = await _prepare_answer(request, conn)
+        parts, language = await _question_parts(request)
+        if len(parts) > 1:
+            return await _answer_parts(parts, language, request, conn)
+        prepared = await _prepare_answer(parts[0], conn, language, request.question if language else None)
 
         # Step 7: Generate LLM response
         text = ""
@@ -2299,7 +2423,11 @@ async def query_fpl(request: QueryRequest, conn=Depends(get_neo4j_conn)):
                 model_key=request.model,
                 timeout=60
             )
-            text = response.text if response.success else f"Error generating response: {response.error}"
+            if not response.success:
+                # Every model failed (quota, outage): the data itself, not an error message
+                logger.error("LLM failed for a query: %s", response.error)
+                return await prepared.response(prepared.fallback())
+            text = response.text
         return await prepared.response(prepared.finish(text))
 
     except HTTPException:
@@ -2355,7 +2483,17 @@ async def _answer_events(request: QueryRequest, conn) -> AsyncIterator[str]:
     prepared: Optional[PreparedAnswer] = None
     stop = ThreadEvent()
     try:
-        prepared = await _prepare_answer(request, conn)
+        parts, language = await _question_parts(request)
+        if len(parts) > 1:
+            # Two or three questions in one message: each is answered whole, so the text arrives
+            # in one piece rather than word by word
+            merged = await _answer_parts(parts, language, request, conn)
+            yield _sse("cards", {"cards": merged.cards, "follow_ups": merged.follow_ups, "sources": merged.sources})
+            yield _sse("delta", {"text": merged.answer})
+            yield _sse("answer", {"text": merged.answer})
+            yield _sse("done", merged.model_dump_json())
+            return
+        prepared = await _prepare_answer(parts[0], conn, language, request.question if language else None)
         events: asyncio.Queue = asyncio.Queue()
         prepared.cards_task.add_done_callback(lambda _task: events.put_nowait(("cards", None)))
         writing = prepared.prompt is not None
@@ -2389,8 +2527,9 @@ async def _answer_events(request: QueryRequest, conn) -> AsyncIterator[str]:
         text = "".join(pieces).strip()
         if error:
             logger.error("Streamed answer failed: %s", error)
-            text = f"{text}\n\n_(The answer was cut short.)_" if text else f"Error generating response: {error}"
-        answer = prepared.finish(text)
+            text = f"{text}\n\n_(The answer was cut short.)_" if text else ""
+        # No text at all (every model failed before writing): the data itself instead of an error
+        answer = prepared.fallback() if error and not text else prepared.finish(text)
         yield _sse("answer", {"text": answer})
         yield _sse("done", (await prepared.response(answer)).model_dump_json())
     except HTTPException as exc:

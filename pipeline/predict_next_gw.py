@@ -87,6 +87,7 @@ logger = logging.getLogger(__name__)
 
 HISTORY_CSV = pm.HISTORY_CSV
 OUTPUT_NAME = "next_gw_predictions.csv"
+RUN_NAME = "prediction_run.json"         # what this run had (services/predictions.run_info)
 FEATURES_NAME = "next_gw_features.csv"   # model inputs per upcoming row, for services/explain.py
 FEATURE_ID_COLUMNS = ["element", "name", "position", "team", "opponent", "fixture", "kickoff_time", "GW", "season"]
 POSITIONS = ("GK", "DEF", "MID", "FWD")
@@ -817,6 +818,16 @@ def predict_next_gameweek(live_dir: str = LIVE_DATA_DIR, client=None, history_cs
     json_path = csv_path[:-4] + ".json"
     _atomic_write(json_path, lambda p: out.to_json(p, orient="records", indent=2))
     _atomic_write(csv_path, lambda p: out.to_csv(p, index=False))  # CSV last: it is what the API watches
+
+    # What this run had, for the site: a run before the bookmakers' prices are collected predicts
+    # without them, and the pages say so (services/predictions.odds_pending)
+    try:
+        run = {"season": season, "gameweek": gameweek, "deadline": event["deadline_time"], "model": version,
+               "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+               "input_coverage": coverage, "odds": odds_status}
+        _atomic_write(os.path.join(live_dir, RUN_NAME), lambda p: json.dump(run, open(p, "w", encoding="utf-8")))
+    except Exception:
+        logger.exception("Couldn't write %s", RUN_NAME)
 
     # Keep this gameweek's pick: the last run before the deadline leaves the final one.
     # A failure here mustn't cost the predictions themselves. Both picks are saved as of the same

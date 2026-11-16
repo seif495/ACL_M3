@@ -423,12 +423,21 @@ export interface HealthStatus {
   ml_model_type?: string | null;
 }
 
+export interface UsualRange {
+  low: number;
+  high: number;
+  p_return: number;
+  p_haul: number;
+}
+
 export interface MLPrediction {
   player_name: string;
   /** FPL's short name ("Evanilson"), for display only; lookups use player_name. */
   web_name?: string | null;
   predicted_points: number;
   confidence_interval?: [number, number];
+  /** What players predicted this much actually scored: 10th-90th percentile, chance of 6+ and of 10+. */
+  usual_range?: UsualRange | null;
   features_used?: Record<string, unknown>;
   model_version: string;
   team_name?: string | null;
@@ -456,6 +465,10 @@ export interface TopPerformersResponse {
     /** Gameweeks actually used: 1 when projections weren't available. */
     horizon?: number;
     horizon_gameweeks?: number[];
+    /** The run was made before the bookmakers' prices were collected: the numbers will move. */
+    odds_pending?: boolean;
+    /** The usual range at a few predicted levels, for the page's guide. */
+    range_legend?: (UsualRange & { predicted: number })[];
   };
 }
 

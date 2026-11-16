@@ -19,6 +19,8 @@ def _no_live_fpl(monkeypatch):
     monkeypatch.setattr(goal_events, "http_get", offline)
     # No test reaches the Guardian with a developer's real key
     monkeypatch.delenv("GUARDIAN_API_KEY", raising=False)
+    # The assistant's question rewrite is an extra LLM call: off unless a test turns it on
+    monkeypatch.setenv("ASSISTANT_REWRITE", "0")
     live_points.clear_cache()
     yield
     live_points.clear_cache()

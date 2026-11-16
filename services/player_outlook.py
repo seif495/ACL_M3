@@ -21,6 +21,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import pandas as pd
 
 from config.settings import CURRENT_SEASON
+from services import prediction_ranges
 from services import answer_cards as ac
 from services import season_service as ss
 from utils.text import normalize_name
@@ -262,6 +263,10 @@ def outlook_text(o: Outlook, season: str = CURRENT_SEASON) -> str:
         if o.position_rank and o.position_pool and o.position in _POSITION_PLURAL:
             rank += f" (#{o.position_rank} of {o.position_pool} {_POSITION_PLURAL[o.position]})"
     lines.append(f"- GW{o.gameweek} predicted points: {o.points:.1f} vs {opponents_text(o.opponents)}{rank}")
+    spread = prediction_ranges.describe(o.points)
+    if spread:
+        # The prediction is an average: this keeps the answer from sounding surer than it is
+        lines.append(f"- What that number has meant: {spread}")
     if len(o.projections) > 1:
         first, last = o.projections[0][0], o.projections[-1][0]
         total = sum(p for _, p, _ in o.projections)

@@ -80,6 +80,8 @@ class PredictionResponse(BaseModel):
     player_name: str
     predicted_points: float
     confidence_interval: Optional[List[float]] = None
+    # {low, high, p_return, p_haul}: what players predicted this much scored (services/prediction_ranges.py)
+    usual_range: Optional[Dict[str, float]] = None
     features_used: Optional[Dict[str, Any]] = None
     model_version: str = "v1"
     fixture_context: Optional[Dict[str, Any]] = None  # NEW: Fixture context for date-aware predictions

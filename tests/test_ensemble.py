@@ -1,6 +1,7 @@
 """The production points model's ensemble (ml/points_model.py): the averaged prediction and SHAP
 values, the members' tree count, and saving and loading the member files."""
 import json
+import os
 
 import numpy as np
 import pandas as pd
@@ -48,7 +49,7 @@ def test_save_and_load_an_ensemble(tmp_path):
     ens = pm.fit_ensemble(df, 20, cols=COLS, seeds=(0, 1, 2))
     model_path, meta_path = tmp_path / "points_v4.json", tmp_path / "points_v4_meta.json"
     pm.save_model(ens, {"version": "v4"}, str(model_path), str(meta_path), features=COLS)
-    assert [p.split("/")[-1] for p in pm.member_paths(str(model_path), 3)] == [
+    assert [os.path.basename(p) for p in pm.member_paths(str(model_path), 3)] == [
         "points_v4.json", "points_v4_m1.json", "points_v4_m2.json"]
     assert all((tmp_path / f).exists() for f in ("points_v4_m1.json", "points_v4_m2.json"))
     meta = json.loads(meta_path.read_text())

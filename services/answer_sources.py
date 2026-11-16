@@ -39,7 +39,7 @@ def file_mtime(path: Optional[str]) -> Optional[float]:
 
 def build_sources(used: Dict[str, Any], *, current_season: str, predictions_gameweek: Optional[int] = None,
                   predictions_mtime: Optional[float] = None, projection_weeks: Sequence[int] = (),
-                  team_gameweek: Optional[int] = None) -> List[str]:
+                  team_gameweek: Optional[int] = None, odds_pending: bool = False) -> List[str]:
     """The answer's sources, in a fixed order.
 
     `used` keys (all optional): "season" (a season id, "all" for every season, or None),
@@ -54,7 +54,9 @@ def build_sources(used: Dict[str, Any], *, current_season: str, predictions_game
     if used.get("predictions"):
         label = f"GW{predictions_gameweek} predictions" if predictions_gameweek else "next-gameweek predictions"
         when = updated_label(predictions_mtime)
-        out.append(f"{label} (updated {when})" if when else label)
+        # A run before the bookmakers' prices are collected: the numbers will move once they are in
+        notes = ([f"updated {when}"] if when else []) + (["bookmakers' prices not in yet"] if odds_pending else [])
+        out.append(f"{label} ({'; '.join(notes)})" if notes else label)
     if used.get("projections") and projection_weeks:
         weeks = list(projection_weeks)
         out.append(f"GW{weeks[0]}-{weeks[-1]} projections" if len(weeks) > 1 else f"GW{weeks[0]} projections")

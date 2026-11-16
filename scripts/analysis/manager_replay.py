@@ -82,6 +82,7 @@ from services import season_service as ss  # noqa: E402
 
 SEASONS = ["2022-23", "2023-24", "2024-25"]   # the seasons with an FPL snapshot before most deadlines
 HORIZON = pnp.PROJECTION_HORIZON
+MAX_HORIZON = 6             # the longest a variant plans over (project --horizon 6)
 DEADLINE = timedelta(minutes=od.DEADLINE_MINUTES)
 
 # Planner variants. "set" overrides services/fpl_manager_planner constants for the whole season,
@@ -94,6 +95,10 @@ VARIANTS: Dict[str, Dict[str, Any]] = {
     "nochips": {"chips": False},
     "h1": {"horizon": 1},
     "h2": {"horizon": 2},
+    # Longer than production's 4: only with projections made by `project --horizon 6` (2026-11-15)
+    "h4": {"horizon": 4},
+    "h5": {"horizon": 5},
+    "h6": {"horizon": 6},
     "decay08": {"set": {"DECAY": 0.8}},
     "decay1": {"set": {"DECAY": 1.0}},
     "ftv0": {"set": {"FT_END_VALUE": 0.0}},
@@ -106,6 +111,9 @@ VARIANTS: Dict[str, Dict[str, Any]] = {
     "hitm2": {"set": {"HIT_MARGIN": 2.0}},
     "hitm4": {"set": {"HIT_MARGIN": 4.0}},
     "nohits": {"set": {"MAX_HITS_PER_GW": 0}},
+    # 2026-11-16: the first squad chosen over the planning horizon (planner.start_squad), not the
+    # one-gameweek predicted Team of the Week
+    "hstart": {"start": "horizon"},
     # 2026-10-31: the chip rules (services/fpl_manager_planner.chip_decision), one threshold at a
     # time each way; late_only plays a chip only when its window forces it
     "tc8": {"set": {"TRIPLE_CAPTAIN_MIN_POINTS": 8.0, "TRIPLE_CAPTAIN_DOUBLE_MIN_POINTS": 6.0}},
@@ -248,6 +256,99 @@ def train_model(feats: pd.DataFrame, season: str, version: str) -> Tuple[Any, Di
     return (lambda frame: pm.predict(final, {"features": cols}, frame)), info
 
 
+# ----------------------------------------------------------------------------- input variants
+
+def _no_odds(rows: pd.DataFrame, coef: Any) -> None:
+    """A run before the bookmakers' prices are collected (early in the week)."""
+    rows[od.FEATURES] = np.nan
+
+
+def _rating_odds(rows: pd.DataFrame, coef: Any) -> None:
+    """The odds features as the model's own team ratings imply them (ml.odds.from_ratings)."""
+    rows[od.FEATURES] = od.from_ratings(rows["rt_xgf"], rows["rt_xga"], coef).to_numpy()
+
+
+def _smooth_form(rows: pd.DataFrame, coef: Any) -> None:
+    """Steadier form for a gameweek further off: the 3-match averages become the 6-match ones and
+    the last match's values the 3-match averages."""
+    cols = set(rows.columns)
+    r3 = {c: rows[c].copy() for c in cols if c.endswith("_r3")}
+    for c in r3:
+        if c[:-1] + "6" in cols:
+            rows[c] = rows[c[:-1] + "6"]
+    for c in cols:
+        if c.endswith("_r1") and c[:-1] + "3" in r3:
+            rows[c] = r3[c[:-1] + "3"]
+
+
+# What the model is given for a gameweek, scored against `base` (production's inputs) by gameweeks
+# ahead (project --input-variants, then report). Step 1 is the next gameweek: there `noodds` is a
+# prediction made before the prices are in and `podds` one that fills them from the ratings.
+INPUT_VARIANTS: Dict[str, Tuple[Any, ...]] = {
+    "base": (),
+    "noodds": (_no_odds,),
+    "podds": (_rating_odds,),
+    "smooth": (_smooth_form,),
+    "podds_smooth": (_rating_odds, _smooth_form),
+}
+
+
+def input_variant_points(rows: pd.DataFrame, players: pd.DataFrame, predict_fn, coef: Any, deadline_gw: int,
+                         gameweek: int) -> pd.DataFrame:
+    """One row per player with a fixture in `gameweek`: his points under every INPUT_VARIANTS entry
+    (pred_<variant>), with the availability multiplier production applies at that step."""
+    step = gameweek - deadline_gw + 1
+    flags = players.set_index(players["element"].astype(int))[["status", "chance_of_playing_next_round"]]
+    out: Dict[str, Dict[int, float]] = {}
+    for name, transforms in INPUT_VARIANTS.items():
+        frame = rows.copy()
+        for transform in transforms:
+            transform(frame, coef)
+        out[name] = {int(k): v for k, v in pnp.points_by_element(frame, predict_fn).items()}
+    elements = sorted(out["base"])
+    mult = np.array([pnp.horizon_availability(flags.at[e, "status"], flags.at[e, "chance_of_playing_next_round"], step)
+                     if e in flags.index else 1.0 for e in elements])
+    table = pd.DataFrame({"deadline_gw": deadline_gw, "gameweek": gameweek, "step": step, "element": elements})
+    for name, pts in out.items():
+        table[f"pred_{name}"] = np.array([pts.get(e, 0.0) for e in elements]) * mult
+    return table
+
+
+def input_variant_quality(inputs: pd.DataFrame, actual: pd.DataFrame, top: int = 20, n_boot: int = 1000,
+                          seed: int = 0) -> pd.DataFrame:
+    """By gameweeks ahead and variant: RMSE, correlation and the top `top` picks' actual points a
+    player, and the last two against `base` with a 95% CI resampling deadlines (season, deadline_gw).
+    `inputs`: input_variant_points tables with a `season`; `actual`: season, gameweek, element, points."""
+    d = inputs.merge(actual[["season", "gameweek", "element", "points"]], on=["season", "gameweek", "element"],
+                     how="left")
+    d["points"] = d["points"].fillna(0.0)
+    names = [c[5:] for c in d.columns if c.startswith("pred_")]
+    rng = np.random.default_rng(seed)
+    rows = []
+    for step, g in d.groupby("step"):
+        groups = [x for _, x in g.groupby(["season", "deadline_gw"])]
+        n = np.array([len(x) for x in groups], dtype=float)
+        sse, tops = {}, {}
+        for name in names:
+            sse[name] = np.array([((x[f"pred_{name}"] - x["points"]) ** 2).sum() for x in groups])
+            tops[name] = np.array([x.nlargest(top, f"pred_{name}")["points"].mean() for x in groups])
+        picks = rng.integers(0, len(groups), (n_boot, len(groups)))
+        for name in names:
+            rmse = float(np.sqrt(sse[name].sum() / n.sum()))
+            row = {"step": int(step), "variant": name, "deadlines": len(groups), "rmse": rmse,
+                   "corr": float(g[f"pred_{name}"].corr(g["points"])), f"top{top}": float(tops[name].mean())}
+            if name != "base":
+                d_rmse = np.sqrt(sse[name][picks].sum(axis=1) / n[picks].sum(axis=1)) \
+                    - np.sqrt(sse["base"][picks].sum(axis=1) / n[picks].sum(axis=1))
+                d_top = (tops[name] - tops["base"])[picks].mean(axis=1)
+                row.update(rmse_vs_base=rmse - float(np.sqrt(sse["base"].sum() / n.sum())),
+                           rmse_lo=float(np.percentile(d_rmse, 2.5)), rmse_hi=float(np.percentile(d_rmse, 97.5)),
+                           top_vs_base=float((tops[name] - tops["base"]).mean()),
+                           top_lo=float(np.percentile(d_top, 2.5)), top_hi=float(np.percentile(d_top, 97.5)))
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
 # ----------------------------------------------------------------------------- project
 
 _JOB: Dict[str, Any] = {}   # the season's inputs for project_deadline (cmd_project sets them)
@@ -266,13 +367,22 @@ def project_deadline(gameweek: int) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[st
     preds = pnp.score_rows(rows, j["predict_fn"], f"xgboost_{j['version']}")
     out = pnp.assemble_output(players, preds, by_team, gameweek, deadline.isoformat(), [])
     next_points = dict(zip(out["element"].astype(int), out["predicted_points"].astype(float)))
-    events = [{"id": g} for g in range(gameweek, gameweek + HORIZON) if g in j["deadlines"]]
+    events = [{"id": g} for g in range(gameweek, gameweek + j.get("horizon", HORIZON)) if g in j["deadlines"]]
+    variants: List[pd.DataFrame] = []
+    on_rows = None
+    if j.get("input_variants"):
+        def on_rows(step_rows: pd.DataFrame, step_gw: int) -> None:
+            variants.append(input_variant_points(step_rows, players, j["predict_fn"], j["rating_odds"], gameweek, step_gw))
+        if len(rows):
+            on_rows(rows, gameweek)
     proj, problems = pnp.build_projections(players, history, season, events, j["fixtures"], j["teams"],
-                                           next_points, j["predict_fn"], extras, pnp._snapshot_age(rows))
+                                           next_points, j["predict_fn"], extras, pnp._snapshot_age(rows), on_rows)
     info = {"gameweek": gameweek, "players": len(players), "rows": len(rows),
             "flagged": int((players["status"] != "a").sum()),
             "snapshot": bool(len(j["status"]) and (j["status"]["GW"] == gameweek).any()),
             "coverage": pnp.input_coverage(rows) if len(rows) else {}, "problems": problems}
+    if variants:
+        info["input_variants"] = pd.concat(variants, ignore_index=True)
     return proj.assign(deadline_gw=gameweek), out.assign(deadline_gw=gameweek), info
 
 
@@ -286,6 +396,14 @@ def cmd_project(args) -> None:
     feats = feats[feats["total_points"].notna()]
     log(f"training features: {len(feats)} rows in {time.time() - t0:.0f}s")
     predict_fn, model_info = train_model(feats, args.season, args.model)
+    rating_odds = None
+    if args.input_variants:
+        if args.model == "v3":
+            raise SystemExit("--input-variants needs v4's ratings and odds features")
+        # Fitted on the seasons the model trained on, never the replayed one
+        rating_odds = od.fit_ratings_map(feats[feats["season"] < args.season])
+        model_info["rating_odds"] = rating_odds
+        log(f"rating-implied odds: log(goals) = a + b log(rating xG), (for, against) = {rating_odds}")
     del feats
     log(f"model {args.model}: {model_info}")
 
@@ -297,13 +415,19 @@ def cmd_project(args) -> None:
     snaps = base.snapshots if base is not None else sn.load_snapshots()
     _JOB.update(season=args.season, history=history, rows=rows, fixtures=fixtures, teams=teams, deadlines=dl,
                 status=snapshot_status(rows, snaps), extras=base, version=args.model, predict_fn=predict_fn,
+                horizon=args.horizon, input_variants=args.input_variants, rating_odds=rating_odds,
                 odds=odds_collection(base.odds, history) if base is not None else None)
     gws = [g for g in sorted(dl) if min(args.start_gws) <= g <= (args.end_gw or 38)]
     results = {}
+    inputs = []
     for gw in gws:
         started = time.time()
         results[gw] = project_deadline(gw)
+        if "input_variants" in results[gw][2]:
+            inputs.append(results[gw][2].pop("input_variants"))
         log(f"  GW{gw} ({time.time() - started:.0f}s): {results[gw][2]}")
+    if inputs:
+        pd.concat(inputs, ignore_index=True).to_parquet(f"{args.out}.inputs.parquet", index=False)
 
     proj = pd.concat([r[0] for r in results.values()], ignore_index=True)
     preds = pd.concat([r[1] for r in results.values()], ignore_index=True)
@@ -315,7 +439,7 @@ def cmd_project(args) -> None:
     prices = pd.concat([players_at(rows, g, _JOB["status"])[["element", "now_cost"]].assign(gameweek=g) for g in gws],
                        ignore_index=True)
     prices.to_parquet(f"{args.out}.prices.parquet", index=False)
-    summary = {"season": args.season, "model": model_info, "gameweeks": gws,
+    summary = {"season": args.season, "model": model_info, "gameweeks": gws, "horizon": args.horizon,
                "deadlines": {str(g): dl[g].isoformat() for g in gws},
                "per_gameweek": [results[g][2] for g in gws], "seconds": round(time.time() - t0, 1)}
     with open(f"{args.out}.json", "w", encoding="utf-8") as f:
@@ -349,11 +473,17 @@ def load_projected(prefix: str) -> Dict[str, Any]:
 
 
 def start_entry(predictions: pd.DataFrame, season: str, gameweek: int, deadline: str,
-                rules: fm.Rules) -> Dict[str, Any]:
-    """The first entry: the predicted Team of the Week at `gameweek` (as the ML manager's start)."""
+                rules: fm.Rules, projections: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+    """The first entry: the predicted Team of the Week at `gameweek` (as the ML manager's start),
+    or with `projections` the squad planner.start_squad builds from it for the whole horizon."""
     selection, details = ss.predicted_selection(predictions.to_dict("records"))
     pick = mr.build_picks(selection, details, season, gameweek, deadline, {}, archived_at=deadline,
                           model="replay")
+    if projections is not None:
+        try:
+            pick = planner.start_squad(pick, projections, rules.to_dict())
+        except Exception as exc:  # noqa: BLE001 - as live: the one-gameweek pick starts the season
+            log(f"  horizon start failed for {season} GW{gameweek}, keeping the pick: {exc}")
     return fm.start_entry_from_pick(pick, deadline, now=pd.Timestamp(deadline) - timedelta(hours=2),
                                     rules=rules, start_gameweek=gameweek)
 
@@ -388,7 +518,9 @@ def play_season(data: Dict[str, Any], variant: str, start_gw: int = 1, rules: fm
             started, problems = time.perf_counter(), []
             if state is None:
                 state = fm.new_state(season, rules, gw)
-                entry = start_entry(preds[preds["deadline_gw"] == gw], season, gw, deadline, rules)
+                horizon_start = spec.get("start") == "horizon"
+                entry = start_entry(preds[preds["deadline_gw"] == gw], season, gw, deadline, rules,
+                                    proj[proj["deadline_gw"] == gw].drop(columns="deadline_gw") if horizon_start else None)
             else:
                 current = fm.squad_at_prices(state, prices[gw], rules)
                 chips = fm.chip_deadlines(rules, state["chips_used"], gw) if spec.get("chips", True) else {}
@@ -537,6 +669,26 @@ def cmd_report(args) -> None:
                       f"{model.get('n_trees')} trees)", "",
                       "| " + " | ".join(q.columns) + " |", "|" + "---|" * len(q.columns)]
             lines += ["| " + " | ".join(str(v) for v in row) + " |" for row in q.itertuples(index=False)] + [""]
+    if args.proj:
+        inputs, actual = [], []
+        for path in sorted(glob.glob(f"{args.proj}.inputs.parquet")):
+            season = json.load(open(path[:-len(".inputs.parquet")] + ".json", encoding="utf-8"))["season"]
+            inputs.append(pd.read_parquet(path).assign(season=season))
+            actual.append(pd.read_parquet(path.replace(".inputs.", ".actual.")).assign(season=season))
+        if inputs:
+            q = input_variant_quality(pd.concat(inputs, ignore_index=True), pd.concat(actual, ignore_index=True))
+            lines += ["", "## Input variants by gameweeks ahead", "",
+                      "What the model is given for each gameweek (INPUT_VARIANTS), against production's inputs "
+                      "(`base`), pooled over the seasons; step 1 is the deadline's own gameweek. The CIs resample "
+                      "deadlines. Lower RMSE and higher top-20 points are better.", "",
+                      "| step | variant | rmse | corr | top20 | rmse vs base [95% CI] | top20 vs base [95% CI] |",
+                      "|---|---|---|---|---|---|---|"]
+            for r in q.to_dict("records"):
+                vs = ("-", "-") if r["variant"] == "base" else (
+                    f"{r['rmse_vs_base']:+.4f} [{r['rmse_lo']:+.4f}, {r['rmse_hi']:+.4f}]",
+                    f"{r['top_vs_base']:+.3f} [{r['top_lo']:+.3f}, {r['top_hi']:+.3f}]")
+                lines.append(f"| {r['step']} | {r['variant']} | {r['rmse']:.4f} | {r['corr']:.4f} | {r['top20']:.3f} | "
+                             f"{vs[0]} | {vs[1]} |")
     text = "\n".join(lines) + "\n"
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(text)
@@ -554,6 +706,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     p.add_argument("--start-gws", "--start-gw", dest="start_gws", type=parse_gws, default=[1],
                    help="the plan's start gameweeks, e.g. 1,5,9,13 (projected from the earliest)")
     p.add_argument("--end-gw", type=int, default=None)
+    p.add_argument("--horizon", type=int, default=HORIZON,
+                   help="gameweeks projected at each deadline (production: %(default)s; more for the h5/h6 variants)")
+    p.add_argument("--input-variants", action="store_true",
+                   help="also score INPUT_VARIANTS at every step (<out>.inputs.parquet, for the report)")
     p.add_argument("--out", required=True, help="output prefix")
     p.set_defaults(func=cmd_project)
     p = sub.add_parser("plan", help="play the season under planner variants")

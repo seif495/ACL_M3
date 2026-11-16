@@ -222,6 +222,42 @@ def fit_goals(p_home, p_away, p_over):
     return lam_h, lam_a
 
 
+def from_ratings(xgf, xga, coef) -> pd.DataFrame:
+    """FEATURES as the model's own team ratings imply them, for a match the bookmakers haven't
+    priced: `xgf` / `xga` are the row's rt_xgf / rt_xga (ml.fixture_strength), `coef` = ((a, b)
+    for goals for, (a, b) for goals against) with log(goals) = a + b * log(rating xG), fitted on
+    matches that have both. Win and draw chances are those of independent Poisson scores. A
+    backtest candidate (scripts/analysis/manager_replay.py's input variants), not served."""
+    (af, bf), (aa, ba) = coef
+    xgf, xga = np.asarray(xgf, dtype=float), np.asarray(xga, dtype=float)
+    ok = np.isfinite(xgf) & np.isfinite(xga)
+    gf, ga = np.full(len(xgf), np.nan), np.full(len(xgf), np.nan)
+    gf[ok] = np.exp(af + bf * np.log(np.maximum(xgf[ok], 1e-6)))
+    ga[ok] = np.exp(aa + ba * np.log(np.maximum(xga[ok], 1e-6)))
+    win, draw = np.full(len(xgf), np.nan), np.full(len(xgf), np.nan)
+    if ok.any():
+        pf, pa = _pmf(gf[ok]), _pmf(ga[ok])
+        cdf_a = np.cumsum(pa, axis=1)
+        win[ok] = (pf[:, 1:] * cdf_a[:, :-1]).sum(axis=1)
+        draw[ok] = (pf * pa).sum(axis=1)
+    return pd.DataFrame({"odds_win": win, "odds_draw": draw, "odds_gf": gf, "odds_ga": ga, "odds_cs": np.exp(-ga)})
+
+
+def fit_ratings_map(feats: pd.DataFrame):
+    """from_ratings' `coef`, by least squares on the log scale over the matches of `feats` (a
+    build_features table with rt_xgf, rt_xga and the odds), one row a team a match."""
+    cols = ["season", "fixture", "team", "rt_xgf", "rt_xga", "odds_gf", "odds_ga"]
+    t = feats[cols].dropna().drop_duplicates(["season", "fixture", "team"])
+    t = t[(t[["rt_xgf", "rt_xga", "odds_gf", "odds_ga"]] > 0).all(axis=1)]
+    if len(t) < 50:
+        raise ValueError(f"only {len(t)} matches with ratings and odds")
+    out = []
+    for rating, goals in (("rt_xgf", "odds_gf"), ("rt_xga", "odds_ga")):
+        b, a = np.polyfit(np.log(t[rating].to_numpy()), np.log(t[goals].to_numpy()), 1)
+        out.append((float(a), float(b)))
+    return tuple(out)
+
+
 # --------------------------------------------------------------------------- features
 
 def collected_at(kickoff: pd.Series) -> pd.Series:

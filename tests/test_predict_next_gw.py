@@ -775,3 +775,29 @@ def test_predictions_missing_everywhere_returns_none(prediction_files):
     bundled, live = prediction_files
     bundled.unlink()
     assert preds_service.get_predictions_df() is None
+
+
+# ------------------------------------------------------------------ what a run had (prediction_run.json)
+
+def test_run_file_says_when_prices_were_missing(live_dir, monkeypatch):
+    monkeypatch.setenv("LIVE_DATA_DIR", str(live_dir))
+    assert preds_service.run_info() == {} and preds_service.odds_pending() is False    # no run yet
+    png.predict_next_gameweek(str(live_dir), client=HorizonClient(), history_csv=str(live_dir / "history.csv"),
+                              predict_fn=lambda f: f["value"].to_numpy() / 20.0, fetch_odds=False)
+    info = preds_service.run_info()
+    assert info["gameweek"] == 9 and info["model"] == pm.MODEL_VERSION and info["odds"] == "not fetched"
+    assert set(info["input_coverage"]) >= {"odds", "snapshot"}
+    # No prices for GW9 in this directory: the run was made without them
+    assert info["input_coverage"]["odds"] == 0.0 and preds_service.odds_pending() is True
+    assert preds_service.odds_pending({"input_coverage": {"odds": 0.9}}) is False
+    assert preds_service.odds_pending({"input_coverage": {}}) is False
+    assert preds_service.odds_pending({"input_coverage": {"odds": "x"}}) is False
+
+
+def test_sources_note_pending_prices():
+    from services import answer_sources
+
+    used = {"predictions": True}
+    assert answer_sources.build_sources(used, current_season="2026-27", predictions_gameweek=11,
+                                        odds_pending=True) == ["GW11 predictions (bookmakers' prices not in yet)"]
+    assert answer_sources.build_sources(used, current_season="2026-27", predictions_gameweek=11) == ["GW11 predictions"]

@@ -223,9 +223,18 @@ def transfer_summary(status_rows: Iterable[Dict[str, Any]], limit: int = 15) -> 
         got.sort(key=lambda t: (-abs(t[1]), -(_num(t[0].get("selected_by_percent")) or 0), t[0].get("name") or ""))
         return [_move(r, "change", round(n / 10.0, 1)) for r, n in got[:limit]]
 
+    from services import price_watch
+    likely = price_watch.watch(rows, limit)
+
+    def expected(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [{**_move(r, "chance", r["chance"]), "net_transfers": r["net_transfers"]} for r in items]
+
     return {"transfers_in": top("transfers_in_event", "transfers"),
             "transfers_out": top("transfers_out_event", "transfers"),
             "risers": changes(1), "fallers": changes(-1),
+            # Not yet moved this gameweek, but with the transfers that usually move a price
+            # (services/price_watch.py: rates from past seasons, not FPL's rule)
+            "likely_risers": expected(likely["risers"]), "likely_fallers": expected(likely["fallers"]),
             "has_transfers": has("transfers_in_event") or has("transfers_out_event"),
             "has_prices": has("cost_change_event")}
 

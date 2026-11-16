@@ -64,6 +64,8 @@ You present data clearly and draw meaningful conclusions."""
         team_context: Optional[str] = None,
         fixture_context: Optional[str] = None,
         site_context: Optional[str] = None,
+        answer_language: Optional[str] = None,
+        original_question: Optional[str] = None,
     ) -> str:
         """
         Template for Q&A responses.
@@ -203,6 +205,17 @@ FirstMessage: {str(is_first_message)}
 - If the team couldn't be loaded, say so in one short sentence, then answer generally.
 """
 
+        language_rule = ""
+        if answer_language:
+            # services/question_rewrite.py translated the message so the data could be found
+            template += f"""
+### The user's own words (in {answer_language}):
+{original_question or question}
+"""
+            language_rule = f"""
+**LANGUAGE:** The user wrote in {answer_language}. Write the whole answer in {answer_language}; keep player and club names, and terms like FPL, as they are. The question below is their message in English.
+"""
+
         template += f"""
 ### User Question:
 {question}
@@ -226,8 +239,10 @@ FirstMessage: {str(is_first_message)}
 - If ML Predictions show Haaland with 8.03 predicted points, that is THE answer when asked "who should I pick" or "how many points will he get".
 - NEVER ignore ML Predictions when they are present - they are the most important data for future performance questions.
 - A ranked ML list is in order, best first. When you name a second choice or an alternative, it is the next entry in that order; for a position ("a midfield option"), it is that position's highest-ranked entry. Never skip a higher-ranked player for a better-known one, and never call a player "next" when someone is ranked between them.
+- A predicted number is an average, not a promise. When a line says what that number has meant (the usual range), you may add it in a few words ("usually 1-12"); never present a prediction as certain.
+- Nobody knows the line-ups before the deadline. When a player's block has a "Line-up" line and he is a rotation risk or unlikely to start, say so in a few words; don't mention it for a nailed player unless asked.
 - When the ML Predictions list several players, compare them on their own numbers. Never say a player has no forecast when he has a line above; only a player whose entry says he is not in the current FPL game has none.
-{transfer_rules}{team_rules}{site_rules}
+{transfer_rules}{team_rules}{site_rules}{language_rule}
 **SCOPE:**
 - You cover Fantasy Premier League and the Premier League, from the data above. If the question is about anything else (the weather, other sports, general knowledge, writing or coding tasks), say in one sentence that you only help with FPL and offer two things you can do. Don't attempt it.
 - If no section above has the data the question needs, say so plainly in one sentence and suggest a related question you can answer. Never fill the gap from memory.

@@ -150,6 +150,10 @@ TRANSFER_TRENDS_RE = _rx(
     r"\bmost transferred\b|\btransferred (?:in|out)\b|\bpopular transfers?\b|\bbandwagons?\b"
     r"|\bwho (?:is|are) (?:everyone|everybody|people|managers) (?:buying|selling|bringing in|getting rid of|transferring)\b"
     r"|\b(?:top|most popular) transfers? (?:in|out)\b")
+# "Will Haaland's price rise?", "Who is about to go up in price?"
+PRICE_OUTLOOK_RE = _rx(
+    r"\b(?:will|going to|gonna|about to|likely to|set to|expected to|due to)\b.{0,40}\b(?:rise|rising|fall|falling|drop|go up|go down|increase|decrease)\b"
+    r"|\bprice (?:predictions?|forecasts?|watch|outlook)\b|\bnext price (?:rise|fall|change)s?\b")
 PRICE_CHANGE_RE = _rx(
     r"\bprice (?:rises?|rose|risers?|increases?|falls?|fell|fallers?|drops?|dropped|changes?|changed)\b"
     r"|\b(?:risen|rose|rising|fallen|fell|falling|dropped|dropping|gone up|gone down|going up|going down) in price\b"
@@ -257,7 +261,8 @@ def wanted(question: str, *, players: Sequence[str] = (), teams: Sequence[str] =
     add("double_blank", DOUBLE_BLANK_RE.search(q))
     add("club_fixtures", not has_players and n_teams >= 1 and CLUB_FIXTURES_RE.search(q)
         and not ({"table", "season_forecast", "match_forecast", "availability"} & set(keys)))
-    add("price_changes", PRICE_CHANGE_RE.search(q))
+    add("price_changes", PRICE_CHANGE_RE.search(q)
+        or re.search(r"\bprices?\b", q, re.IGNORECASE) and PRICE_OUTLOOK_RE.search(q))
     add("transfer_trends", TRANSFER_TRENDS_RE.search(q))
     add("differentials", DIFFERENTIAL_RE.search(q) and "rules" not in keys)
     add("ownership", OWNERSHIP_RE.search(q) and "rules" not in keys and "differentials" not in keys)
@@ -689,6 +694,30 @@ def price_changes_text(prices: List[Dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
+def price_watch_text(likely: Dict[str, List[Dict[str, Any]]], players: Sequence[str] = ()) -> Optional[str]:
+    """Who is likely to change price before the deadline (services/price_watch.py), and where the
+    named players stand."""
+    risers, fallers = likely.get("risers") or [], likely.get("fallers") or []
+    if not risers and not fallers:
+        return None
+
+    def lines(rows: List[Dict[str, Any]]) -> List[str]:
+        return [f"- {_name(r)} ({_text(r.get('team'))}): {r['chance']:.0%} ({r['net_transfers']:+,} net transfers so far)"
+                for r in rows[:LIST_ROWS]]
+
+    out = ["Likely price changes before the deadline. The chance is how often players with that many net transfers "
+           "changed price in past seasons; FPL doesn't publish its rule, so it is an estimate:"]
+    if risers:
+        out += ["Likely to rise:"] + lines(risers)
+    if fallers:
+        out += ["Likely to fall:"] + lines(fallers)
+    listed = {_text(r.get("name")).lower() for r in risers + fallers}
+    for name in players:
+        if name.lower() not in listed:
+            out.append(f"- {name}: not among the players likely to change price this gameweek.")
+    return "\n".join(out)
+
+
 def double_blank_text(specials: Dict[int, Dict[str, List[str]]]) -> Optional[str]:
     if not specials:
         return None
@@ -1015,7 +1044,10 @@ def _build(key: str, question: str, conn, *, players: Sequence[str], teams: Sequ
         rows = _status_rows()
         if not rows or "cost_change_event" not in rows[0]:
             return None
-        return Fact(key, price_changes_text(news.fpl_news(rows)["prices"]), "FPL's price changes")
+        from services import price_watch
+        text = price_changes_text(news.fpl_news(rows)["prices"])
+        likely = price_watch_text(price_watch.watch(rows), players)
+        return Fact(key, text + ("\n\n" + likely if likely else ""), "FPL's price changes and transfer counts")
     if key == "double_blank":
         from services import my_team_assistant
         text = double_blank_text(my_team_assistant.doubles_and_blanks(ss.get_fixture_ticker(conn, 10)))

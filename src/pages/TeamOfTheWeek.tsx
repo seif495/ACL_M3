@@ -174,7 +174,7 @@ export function TeamOfTheWeek() {
         title="Team of the Week"
         description={
           view === 'predicted'
-            ? 'The highest-scoring XI our model expects next gameweek, picked like a real FPL squad: £100m, 3 players per club at most.'
+            ? 'The highest-scoring XI our model expects next gameweek, picked like a real FPL squad: £100m, 3 players per club at most. It is a fresh squad every week with no transfer limit; the ML manager tab plays under the real rules.'
             : view === 'review'
               ? 'How the model’s pick for a past gameweek actually did: each player’s predicted and real FPL points, against the average FPL score.'
               : view === 'manager'

@@ -154,6 +154,15 @@ function PlayerCell({
           <>
             <PositionBadge position={row.position} className="w-8" />
             <StatusBadge status={row.status} chance={row.chance_of_playing_next_round} news={row.news} />
+            {row.lineup && row.lineup.start_chance < 0.6 && (!row.status || row.status === 'a') && (
+              // Fit, but not a regular starter lately: the prediction leans on him playing
+              <span
+                className="rounded-sm border border-line px-1.5 py-0.5 text-micro font-semibold uppercase text-fg-muted"
+                title={`Players with his recent starts started their next match ${Math.round(row.lineup.start_chance * 100)}% of the time`}
+              >
+                {row.lineup.label === 'unlikely to start' ? 'Bench risk' : 'Rotation risk'}
+              </span>
+            )}
           </>
         }
       />
@@ -235,6 +244,15 @@ function PlayerLookup() {
                 <span className="block text-micro uppercase text-fg-subtle">Pred. pts</span>
               </span>
             </div>
+            {result.usual_range && (
+              <p className="mt-2 text-data text-fg-muted">
+                Players predicted this much have usually scored{' '}
+                <span className="font-semibold tabular-nums text-fg">
+                  {result.usual_range.low}–{result.usual_range.high}
+                </span>
+                , with 6 or more {Math.round(result.usual_range.p_return * 100)}% of the time.
+              </p>
+            )}
             {result.fixture_context && (
               <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line pt-2 text-data text-fg-muted">
                 <span>GW{result.fixture_context.matchday} vs</span>
@@ -324,6 +342,8 @@ export function Predictions() {
   const avatarByName = usePlayerAvatars([...topRows, ...valueRows].map((r) => r.player_name));
 
   const metaGw = topPerformers?.metadata?.gameweek ?? bestValue?.metadata?.gameweek;
+  const rangeLegend = topPerformers?.metadata?.range_legend ?? [];
+  const oddsPending = topPerformers?.metadata?.odds_pending === true;
   const gameweek: number | undefined =
     (typeof metaGw === 'number' ? metaGw : undefined) ??
     topRows.find((r) => r.fixture_context)?.fixture_context?.matchday ??
@@ -393,6 +413,16 @@ export function Predictions() {
         <span className={cn('tabular-nums', highlight ? 'font-display text-h3 font-bold text-accent' : 'font-semibold text-fg')}>
           {r.predicted_points.toFixed(1)}
         </span>
+        {highlight && r.usual_range && (
+          // The number is an average: where players predicted this much have actually landed
+          <span
+            className="block whitespace-nowrap text-micro font-normal tabular-nums text-fg-subtle"
+            title={`Players predicted about ${r.predicted_points.toFixed(1)} have usually scored ${r.usual_range.low} to ${r.usual_range.high}`}
+          >
+            <span className="sr-only">usual range </span>
+            {r.usual_range.low}–{r.usual_range.high}
+          </span>
+        )}
         {highlight && r.fixture_context && (
           // The fixture column is hidden on phones; keep the opponent visible next to the points.
           <span className="block text-micro font-normal text-fg-subtle sm:hidden">
@@ -640,13 +670,39 @@ export function Predictions() {
           <Card>
             <SectionHeading as="h2" size="md" title="How to read this" />
             <ul className="space-y-2 text-data text-fg-muted">
+              {oddsPending && (
+                <li className="rounded-md border border-line bg-surface-2 px-3 py-2 text-fg">
+                  Provisional: the bookmakers' prices for this gameweek aren't published yet (usually Friday evening or
+                  Tuesday afternoon, UK time). The numbers are refreshed once they are in, and change a little.
+                </li>
+              )}
               <li>
                 <span className="font-semibold text-fg">xPts</span> is the model's expected points for the gameweek. Double gameweeks are summed.
               </li>
+              {rangeLegend.length > 0 && (
+                <li>
+                  It is an average, and one match can land far from it. The small numbers under each prediction are the
+                  usual range: where four in five players predicted that much have finished.{' '}
+                  {rangeLegend.map((l, i) => (
+                    <span key={l.predicted}>
+                      {i > 0 && '; '}
+                      <span className="tabular-nums text-fg">{l.predicted.toFixed(1)}</span> has meant {l.low}–{l.high}, with 6
+                      or more {Math.round(l.p_return * 100)}% of the time
+                    </span>
+                  ))}
+                  .
+                </li>
+              )}
               <li>
                 The 4-gameweek view adds each player's projected points for the coming gameweeks from the same model run, with availability fading further ahead.
               </li>
               <li>Injured and suspended players are predicted 0; doubtful players are scaled by their chance of playing.</li>
+              <li>
+                Line-ups come out after the deadline, so no prediction knows them. A fit player who hasn't been starting
+                lately is marked <span className="font-semibold text-fg">Rotation risk</span> or{' '}
+                <span className="font-semibold text-fg">Bench risk</span>, from how often players with the same recent starts
+                started their next match.
+              </li>
               <li>Official FPL team news for doubtful or unavailable players is shown under their name.</li>
             </ul>
           </Card>

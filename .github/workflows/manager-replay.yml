@@ -30,6 +30,13 @@ on:
       start_gws:
         description: 'Gameweeks each season is played from, comma-separated (each start is one path; pooling several measures smaller effects)'
         default: '1,5,9,13'
+      horizon:
+        description: 'Gameweeks projected at each deadline (production: 4; 6 for the h5 and h6 variants)'
+        default: '4'
+      input_variants:
+        description: 'Also score the input variants (odds filled from ratings, steadier form) by gameweeks ahead'
+        type: boolean
+        default: false
 
 # The inputs' defaults again, for a run without inputs
 env:
@@ -38,6 +45,8 @@ env:
   REF: ${{ inputs.ref || 'default' }}
   MODEL: ${{ inputs.model || 'v4' }}
   START_GWS: ${{ inputs.start_gws || '1,5,9,13' }}
+  HORIZON: ${{ inputs.horizon || '4' }}
+  INPUT_VARIANTS: ${{ inputs.input_variants && '--input-variants' || '' }}
 
 jobs:
   seasons:
@@ -71,7 +80,7 @@ jobs:
       - name: Fetch bookmaker odds from football-data.co.uk
         if: env.MODEL == 'v4'
         run: python -m scripts.data.fetch_odds --no-fixtures || echo "::warning::odds fetch incomplete; the odds features may be empty"
-      - run: python -m scripts.analysis.manager_replay project --season '${{ matrix.season }}' --model "$MODEL" --start-gws "$START_GWS" --out 'proj_${{ matrix.season }}'
+      - run: python -m scripts.analysis.manager_replay project --season '${{ matrix.season }}' --model "$MODEL" --start-gws "$START_GWS" --horizon "$HORIZON" $INPUT_VARIANTS --out 'proj_${{ matrix.season }}'
       - run: python -m scripts.analysis.manager_replay plan --proj 'proj_${{ matrix.season }}' --variants "$VARIANTS" --start-gws "$START_GWS" --out 'plan_${{ matrix.season }}.json'
       - uses: actions/upload-artifact@v4
         if: always()

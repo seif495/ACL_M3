@@ -956,7 +956,10 @@ def test_stream_sends_cards_pieces_answer_and_done():
 def test_stream_reports_a_failed_model():
     events = stream_events("Erling Haaland stats this season", FakeLLM(pieces=(), error="quota exhausted"))
     answer = dict(events)["answer"]["text"]
-    assert answer == "Error generating response: quota exhausted"
+    # No error text: with nothing to show, a plain "try again"; the cards still arrive
+    assert answer == ("I can't write an answer right now: the language model isn't responding. "
+                      "Please try again in a minute.")
+    assert [c["type"] for c in dict(events)["cards"]["cards"]] == ["player"]
     cut = stream_events("Erling Haaland stats this season", FakeLLM(pieces=("Haaland has",), error="reset"))
     assert dict(cut)["answer"]["text"] == "Haaland has\n\n_(The answer was cut short.)_"
 

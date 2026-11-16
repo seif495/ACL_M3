@@ -111,7 +111,7 @@ def test_variants_only_set_constants_the_planner_has():
     for name, spec in mrp.VARIANTS.items():
         for key in spec.get("set", {}):
             assert hasattr(planner, key), (name, key)
-        assert spec.get("horizon", 1) <= mrp.HORIZON
+        assert spec.get("horizon", 1) <= mrp.MAX_HORIZON
 
 
 def test_planner_constants_are_restored():
@@ -247,3 +247,122 @@ def test_report_pools_the_paths_and_counts_those_ahead(tmp_path):
     assert "| +0.88 [" in row                           # (10 + 5 - 10 + 2) / 8 gameweek differences
     ref = next(line for line in text.splitlines() if line.startswith("| default |"))
     assert "| 200 |" in ref and "| - |" in ref
+
+
+# ------------------------------------------------------------------ input variants (project --input-variants)
+
+def test_rating_implied_odds_follow_the_fitted_map():
+    coef = ((0.1, 0.9), (0.05, 1.1))
+    feats = pd.DataFrame({"season": "2023-24", "fixture": range(80), "team": "A",
+                          "rt_xgf": np.linspace(0.6, 2.4, 80), "rt_xga": np.linspace(2.2, 0.5, 80)})
+    feats["odds_gf"] = np.exp(coef[0][0] + coef[0][1] * np.log(feats["rt_xgf"]))
+    feats["odds_ga"] = np.exp(coef[1][0] + coef[1][1] * np.log(feats["rt_xga"]))
+    fitted = od.fit_ratings_map(pd.concat([feats, feats]))        # a player row each: one row a team a match
+    assert np.allclose(fitted, coef)
+    with pytest.raises(ValueError):
+        od.fit_ratings_map(feats.head(10))
+    out = od.from_ratings([1.8, 0.7, np.nan], [0.7, 1.8, 1.0], fitted)
+    assert list(out.columns) == od.FEATURES
+    assert out.loc[0, "odds_gf"] == pytest.approx(np.exp(0.1 + 0.9 * np.log(1.8)))
+    assert out.loc[0, "odds_win"] > 0.6 > out.loc[1, "odds_win"]          # the stronger side wins more often
+    assert out.loc[0, "odds_cs"] == pytest.approx(np.exp(-out.loc[0, "odds_ga"]))
+    assert 0.1 < out.loc[0, "odds_draw"] < 0.35
+    win_other = od.from_ratings([0.7], [1.8], ((0.05, 1.1), (0.1, 0.9)))    # the same match from the other side
+    assert out.loc[0, "odds_win"] + out.loc[0, "odds_draw"] + win_other.loc[0, "odds_win"] == pytest.approx(1.0, abs=1e-6)
+    assert out.loc[2].isna().all()
+
+
+def test_input_variant_transforms():
+    rows = pd.DataFrame({"minutes_r1": [90.0], "minutes_r3": [60.0], "minutes_r6": [30.0],
+                         "total_points_r1": [12.0], "total_points_r3": [6.0], "total_points_r6": [4.0],
+                         "team_gf": [1.5], "rt_xgf": [1.6], "rt_xga": [0.9],
+                         **{c: [0.5] for c in od.FEATURES}})
+    smooth = rows.copy()
+    mrp._smooth_form(smooth, None)
+    assert smooth.loc[0, ["minutes_r1", "minutes_r3", "minutes_r6"]].tolist() == [60.0, 30.0, 30.0]
+    assert smooth.loc[0, ["total_points_r1", "total_points_r3"]].tolist() == [6.0, 4.0]
+    assert smooth.loc[0, "team_gf"] == 1.5
+    none = rows.copy()
+    mrp._no_odds(none, None)
+    assert none[od.FEATURES].isna().all().all() and none.loc[0, "minutes_r3"] == 60.0
+    filled = rows.copy()
+    mrp._rating_odds(filled, ((0.0, 1.0), (0.0, 1.0)))
+    assert filled.loc[0, "odds_gf"] == pytest.approx(1.6) and filled.loc[0, "odds_ga"] == pytest.approx(0.9)
+    assert set(mrp.INPUT_VARIANTS) == {"base", "noodds", "podds", "smooth", "podds_smooth"}
+
+
+def test_input_variant_points_apply_the_steps_availability():
+    rows = pd.DataFrame({"element": [1, 1, 2, 3], "value": [100.0, 100.0, 60.0, 80.0], "rt_xgf": 1.4, "rt_xga": 1.1,
+                         "minutes_r1": 90.0, "minutes_r3": 80.0, "minutes_r6": 70.0,
+                         **{c: [0.4] * 4 for c in od.FEATURES}})
+    players = pd.DataFrame({"element": [1, 2, 3], "status": ["a", "s", "i"],
+                            "chance_of_playing_next_round": [np.nan, 0.0, 0.0]})
+
+    def predict(frame):          # 5 points a 10.0m fixture, one more when the odds are missing
+        return frame["value"].to_numpy() / 20.0 + frame["odds_win"].isna().to_numpy()
+    step1 = mrp.input_variant_points(rows, players, predict, ((0.0, 1.0), (0.0, 1.0)), 10, 10)
+    assert step1["step"].tolist() == [1, 1, 1] and step1["element"].tolist() == [1, 2, 3]
+    assert step1["pred_base"].tolist() == [10.0, 0.0, 0.0]            # a double summed; out players 0 this gameweek
+    assert step1["pred_noodds"].tolist() == [12.0, 0.0, 0.0]
+    step3 = mrp.input_variant_points(rows, players, predict, ((0.0, 1.0), (0.0, 1.0)), 10, 12)
+    assert step3["pred_base"].tolist() == pytest.approx([10.0, 3.0, 4.0 * 0.35])   # suspended back, injured 0.35
+    assert rows["odds_win"].notna().all()                              # the caller's rows are untouched
+
+
+def test_input_variant_quality_compares_with_base():
+    rng = np.random.default_rng(0)
+    frames, actual = [], []
+    for season in ("2023-24", "2024-25"):
+        for deadline in range(1, 9):
+            for step in (1, 2):
+                truth = rng.gamma(2.0, 1.0, 60)
+                frames.append(pd.DataFrame({"season": season, "deadline_gw": deadline, "gameweek": deadline + step - 1,
+                                            "step": step, "element": range(60), "pred_base": truth + rng.normal(0, 1.0, 60),
+                                            "pred_better": truth + rng.normal(0, 0.2, 60)}))
+                if step == 1 or deadline == 8:
+                    actual.append(pd.DataFrame({"season": season, "gameweek": deadline + step - 1, "element": range(60),
+                                                "points": truth}))
+    inputs = pd.concat(frames, ignore_index=True)
+    # each (season, gameweek) has one truth: keep the first written
+    truth = pd.concat(actual, ignore_index=True).drop_duplicates(["season", "gameweek", "element"])
+    inputs = inputs.merge(truth, on=["season", "gameweek", "element"]).assign(
+        pred_base=lambda d: d["points"] + (d["pred_base"] - d["pred_base"].mean()) * 0 + rng.normal(0, 1.0, len(d)),
+        pred_better=lambda d: d["points"] + rng.normal(0, 0.2, len(d))).drop(columns="points")
+    q = mrp.input_variant_quality(inputs, truth, top=10, n_boot=200).set_index(["step", "variant"])
+    assert q.loc[(1, "base"), "deadlines"] == 16
+    assert q.loc[(1, "better"), "rmse"] < q.loc[(1, "base"), "rmse"]
+    assert q.loc[(1, "better"), "rmse_hi"] < 0 < q.loc[(1, "better"), "top_lo"]      # reliably better on both
+    assert np.isnan(q.loc[(1, "base"), "rmse_vs_base"])
+
+
+# ------------------------------------------------------------------ the first squad over the horizon (hstart)
+
+def test_horizon_start_buys_for_the_coming_gameweeks():
+    data = synthetic_season()
+    gw = GWS[0]
+    deadline = data["summary"]["deadlines"][str(gw)]
+    preds = data["predictions"][data["predictions"]["deadline_gw"] == gw]
+    proj = data["projections"][data["projections"]["deadline_gw"] == gw].drop(columns="deadline_gw")
+    one_week = mrp.start_entry(preds, SEASON, gw, deadline, mrp.fm.DEFAULT_RULES)
+    over_horizon = mrp.start_entry(preds, SEASON, gw, deadline, mrp.fm.DEFAULT_RULES, proj)
+    names = lambda entry: {p["name"] for p in entry["squad"]}  # noqa: E731
+    assert len(over_horizon["squad"]) == 15 and over_horizon["transfers"] == [] and over_horizon["chip"] is None
+    assert over_horizon["bank_after"] >= 0
+    # P25 is the one player projected well for the next four gameweeks (5.0 against 2.0)
+    assert "P25" in names(over_horizon)
+    captain = next(p for p in over_horizon["squad"] if p["captain"])
+    assert captain["name"] == "P25" and captain["role"] == "starter"
+    assert len({p["element"] for p in over_horizon["squad"]}) == 15
+    assert one_week["gameweek"] == over_horizon["gameweek"] == gw
+
+
+def test_hstart_plays_a_season_and_a_failed_build_keeps_the_pick(monkeypatch):
+    data = synthetic_season()
+    res = mrp.play_season(data, "hstart")
+    assert [g["gameweek"] for g in res["gameweeks"] if not g.get("void")] == GWS
+    assert not any(g["problems"] for g in res["gameweeks"])
+
+    def broken(*args, **kwargs):
+        raise ValueError("no projections")
+    monkeypatch.setattr(planner, "start_squad", broken)
+    assert mrp.play_season(data, "hstart")["gameweeks"][0]["points"] == mrp.play_season(data, "default")["gameweeks"][0]["points"]
